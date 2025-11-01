@@ -1,0 +1,149 @@
+# Tool-Enhanced Gift Recommendation TRM Configuration
+
+# Model architecture
+arch:
+  name: "models.tools.tool_enhanced_trm@ToolEnhancedTRM"
+  loss:
+    name: "models.losses.supervised_loss@SupervisedLoss"
+  
+  # Base TRM parameters
+  hidden_size: 256
+  L_layers: 2
+  H_cycles: 3
+  L_cycles: 4
+  num_heads: 8
+  expansion: 2.0
+  pos_encodings: "rope"
+  rms_norm_eps: 1e-5
+  rope_theta: 10000.0
+  
+  # ACT parameters
+  halt_max_steps: 5
+  halt_exploration_prob: 0.1
+  no_ACT_continue: true
+  
+  # RL-specific parameters
+  action_space_size: 100
+  max_recommendations: 5
+  value_head_hidden: 256
+  policy_head_hidden: 256
+  reward_prediction: true
+  reward_head_hidden: 128
+  
+  # Action selection
+  action_selection_method: "top_k"
+  epsilon: 0.1
+  temperature: 1.0
+  
+  # PPO parameters
+  ppo_clip_ratio: 0.2
+  value_loss_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+  
+  # Tool-specific parameters
+  max_tool_calls_per_step: 3
+  tool_call_threshold: 0.5
+  tool_result_encoding_dim: 128
+  tool_selection_method: "confidence"  # "confidence", "random", "round_robin"
+  
+  # Tool integration
+  tool_fusion_method: "concatenate"  # "concatenate", "attention", "gating"
+  tool_attention_heads: 4
+  
+  # Tool training parameters
+  tool_usage_reward_weight: 0.1
+  tool_efficiency_penalty: 0.05
+
+# Training parameters
+global_batch_size: 16
+epochs: 1500
+lr: 1e-4
+lr_min_ratio: 0.1
+lr_warmup_steps: 100
+weight_decay: 0.01
+beta1: 0.9
+beta2: 0.95
+
+# RL Training specific
+rl_training:
+  num_episodes: 3000
+  max_steps_per_episode: 10
+  batch_size: 32
+  gamma: 0.99
+  ppo_epochs: 4
+  experience_buffer_size: 15000
+  min_experiences_for_update: 150
+  eval_frequency: 50
+  eval_episodes: 15
+  enable_tools: true
+  tool_usage_reward_weight: 0.15
+
+# Tool configuration
+tools:
+  enable_caching: true
+  cache_ttl: 3600  # 1 hour
+  max_concurrent_calls: 5
+  timeout: 30  # seconds
+  
+  # Available tools
+  available_tools:
+    - "price_comparison"
+    - "inventory_check" 
+    - "review_analysis"
+    - "trend_analysis"
+    - "budget_optimizer"
+
+# Data paths
+data_paths: ["data/gift_recommendation_train"]
+data_paths_test: ["data/gift_recommendation_test"]
+
+# Environment
+environment:
+  gift_catalog_path: "data/gift_catalog.json"
+  user_feedback_path: "data/user_feedback.json"
+
+# Evaluation
+eval_interval: 100
+min_eval_interval: 50
+evaluators: []
+
+# Checkpointing
+checkpoint_every_eval: true
+checkpoint_path: "checkpoints/tool_enhanced_gift_recommendation"
+project_name: "GiftRecommendation-Tool-Enhanced-TRM"
+run_name: null
+
+# Logging
+log_frequency: 10
+save_frequency: 100
+wandb_project: "gift-recommendation-tools"
+
+# Device settings
+device: "cpu"  # Use "cuda" if available
+forward_dtype: "float32"
+
+# Multi-phase training
+training_phases:
+  # Phase 1: Supervised pre-training
+  phase1:
+    name: "supervised_pretraining"
+    epochs: 500
+    enable_tools: false
+    enable_rl: false
+    
+  # Phase 2: Tool usage learning
+  phase2:
+    name: "tool_learning"
+    epochs: 300
+    enable_tools: true
+    enable_rl: false
+    tool_learning_rate: 5e-5
+    
+  # Phase 3: RL fine-tuning with tools
+  phase3:
+    name: "rl_finetuning"
+    epochs: 700
+    enable_tools: true
+    enable_rl: true
+    rl_learning_rate: 1e-5
