@@ -35,9 +35,12 @@ def test_rl_model():
         "seq_len": 50,
         "vocab_size": 1000,
         "num_puzzle_identifiers": 1,
+        "puzzle_emb_ndim": 0,  # No puzzle embedding for simplicity
+        "puzzle_emb_len": 0,
         "hidden_size": 128,
         "H_cycles": 2,
         "L_cycles": 3,
+        "H_layers": 2,
         "L_layers": 2,
         "num_heads": 4,
         "expansion": 2.0,
@@ -49,7 +52,8 @@ def test_rl_model():
         "value_head_hidden": 64,
         "policy_head_hidden": 64,
         "reward_prediction": True,
-        "reward_head_hidden": 32
+        "reward_head_hidden": 32,
+        "forward_dtype": "float32"
     }
     
     # Create model
@@ -76,10 +80,12 @@ def test_rl_model():
     print(f"✓ Environment reset with {len(state.available_gifts)} available gifts")
     
     # Test model forward pass
-    carry = model.initial_carry({
-        "inputs": torch.randn(config["seq_len"]),
+    # Create proper batch for initial carry
+    dummy_batch = {
+        "inputs": torch.randint(0, config["vocab_size"], (config["seq_len"],)),
         "puzzle_identifiers": torch.zeros(1, dtype=torch.long)
-    })
+    }
+    carry = model.initial_carry(dummy_batch)
     
     with torch.no_grad():
         rl_output = model.forward_rl(carry, state, state.available_gifts)
@@ -119,9 +125,12 @@ def test_tool_enhanced_model():
         "seq_len": 50,
         "vocab_size": 1000,
         "num_puzzle_identifiers": 1,
+        "puzzle_emb_ndim": 0,
+        "puzzle_emb_len": 0,
         "hidden_size": 128,
         "H_cycles": 2,
         "L_cycles": 3,
+        "H_layers": 2,
         "L_layers": 2,
         "num_heads": 4,
         "expansion": 2.0,
@@ -140,7 +149,8 @@ def test_tool_enhanced_model():
         "tool_result_encoding_dim": 64,
         "tool_selection_method": "confidence",
         "tool_fusion_method": "concatenate",
-        "tool_usage_reward_weight": 0.1
+        "tool_usage_reward_weight": 0.1,
+        "forward_dtype": "float32"
     }
     
     # Create model
@@ -166,10 +176,11 @@ def test_tool_enhanced_model():
     print(f"✓ Environment reset")
     
     # Test model forward pass with tools
-    carry = model.initial_carry({
-        "inputs": torch.randn(config["seq_len"]),
+    dummy_batch = {
+        "inputs": torch.randint(0, config["vocab_size"], (config["seq_len"],)),
         "puzzle_identifiers": torch.zeros(1, dtype=torch.long)
-    })
+    }
+    carry = model.initial_carry(dummy_batch)
     
     with torch.no_grad():
         new_carry, rl_output, tool_calls = model.forward_with_tools(
@@ -214,9 +225,12 @@ def test_training_integration():
         "seq_len": 30,
         "vocab_size": 500,
         "num_puzzle_identifiers": 1,
+        "puzzle_emb_ndim": 0,
+        "puzzle_emb_len": 0,
         "hidden_size": 64,
         "H_cycles": 1,
         "L_cycles": 2,
+        "H_layers": 1,
         "L_layers": 1,
         "num_heads": 2,
         "expansion": 2.0,
@@ -227,7 +241,8 @@ def test_training_integration():
         "max_recommendations": 2,
         "value_head_hidden": 32,
         "policy_head_hidden": 32,
-        "reward_prediction": False
+        "reward_prediction": False,
+        "forward_dtype": "float32"
     }
     
     # Training configuration

@@ -99,7 +99,7 @@ class RLEnhancedTRM(TinyRecursiveReasoningModel_ACTV1):
         """Initialize encoders for environment state"""
         # User profile encoder
         self.user_encoder = nn.Sequential(
-            nn.Linear(50, self.config.hidden_size),  # Assuming 50-dim user features
+            nn.Linear(26, self.config.hidden_size),  # 26-dim user features (5+8+7+6)
             nn.ReLU(),
             nn.Linear(self.config.hidden_size, self.config.hidden_size)
         )
@@ -181,16 +181,27 @@ class RLEnhancedTRM(TinyRecursiveReasoningModel_ACTV1):
         user_encoding = self.encode_environment_state(env_state)
         
         # Create batch for TRM forward pass
+        # Use dummy tokens for TRM input
+        seq_len = self.config.seq_len
+        dummy_tokens = torch.randint(0, self.config.vocab_size, (seq_len,), device=user_encoding.device)
+        
         batch = {
-            "inputs": user_encoding.squeeze(0),  # Remove batch dimension
+            "inputs": dummy_tokens,
             "puzzle_identifiers": torch.zeros(1, dtype=torch.long, device=user_encoding.device)
         }
         
         # TRM forward pass
-        new_carry, logits, (q_halt, q_continue) = self.inner(carry, batch)
+        # Convert ACT carry to inner carry
+        inner_carry = carry.inner_carry if hasattr(carry, 'inner_carry') else carry
+        new_carry, logits, (q_halt, q_continue) = self.inner(inner_carry, batch)
         
         # Get hidden state for RL heads
-        hidden_state = new_carry.inner_carry.z_H.mean(dim=1)  # Average over sequence
+        # z_H shape: [batch_size, seq_len, hidden_size] -> [batch_size, hidden_size]
+        hidden_state = new_carry.z_H.mean(dim=1)  # Average over sequence
+        
+        # If batch_size > 1, take first batch element
+        if hidden_state.dim() > 1 and hidden_state.size(0) > 1:
+            hidden_state = hidden_state[0]  # Take first batch element
         
         # Policy output - action probabilities over available gifts
         action_logits = self.policy_head(hidden_state)
@@ -199,7 +210,10 @@ class RLEnhancedTRM(TinyRecursiveReasoningModel_ACTV1):
         if len(available_gifts) < self.rl_config.action_space_size:
             # Mask unavailable actions
             mask = torch.zeros_like(action_logits)
-            mask[:, :len(available_gifts)] = 1.0
+            if action_logits.dim() == 1:
+                mask[:len(available_gifts)] = 1.0
+            else:
+                mask[:, :len(available_gifts)] = 1.0
             action_logits = action_logits * mask + (1 - mask) * (-1e9)
         
         action_probs = F.softmax(action_logits, dim=-1)
@@ -218,8 +232,11 @@ class RLEnhancedTRM(TinyRecursiveReasoningModel_ACTV1):
         
         for gift_encoding in gift_encodings:
             # Concatenate user state and gift encoding
-            combined = torch.cat([hidden_state.squeeze(0), gift_encoding], dim=-1)
-            score = self.gift_scorer(combined.unsqueeze(0))
+            # hidden_state shape: [1, hidden_size], gift_encoding shape: [hidden_size]
+            user_state_flat = hidden_state.squeeze(0)  # Remove batch dim: [hidden_size]
+            
+            combined = torch.cat([user_state_flat, gift_encoding], dim=0)  # [hidden_size * 2]
+            score = self.gift_scorer(combined.unsqueeze(0))  # Add batch dimension for scorer
             gift_scores.append(score)
         
         gift_scores = torch.cat(gift_scores, dim=0) if gift_scores else torch.tensor([])
@@ -274,15 +291,18 @@ class RLEnhancedTRM(TinyRecursiveReasoningModel_ACTV1):
             }
         
         # Limit probabilities to available gifts
-        available_probs = action_probs[0, :num_available]  # Remove batch dim and limit
+        if action_probs.dim() == 1:
+            available_probs = action_probs[:num_available]
+        else:
+            available_probs = action_probs[0, :num_available]  # Remove batch dim and limit
         
         if deterministic or self.rl_config.action_selection_method == "top_k":
             # Select top-k gifts
             k = min(self.rl_config.max_recommendations, num_available)
             top_k_values, top_k_indices = torch.topk(available_probs, k)
             
-            selected_indices = top_k_indices.cpu().numpy()
-            confidence_scores = top_k_values.cpu().numpy()
+            selected_indices = top_k_indices.detach().cpu().numpy()
+            confidence_scores = top_k_values.detach().cpu().numpy()
             log_probs = torch.log(top_k_values + 1e-8).sum()
             
         elif self.rl_config.action_selection_method == "sampling":
@@ -321,15 +341,15 @@ class RLEnhancedTRM(TinyRecursiveReasoningModel_ACTV1):
                 # Random selection
                 k = min(self.rl_config.max_recommendations, num_available)
                 selected_indices = np.random.choice(num_available, k, replace=False)
-                confidence_scores = available_probs[selected_indices].cpu().numpy()
+                confidence_scores = available_probs[selected_indices].detach().cpu().numpy()
                 log_probs = torch.log(available_probs[selected_indices] + 1e-8).sum()
             else:
                 # Greedy selection (same as top_k)
                 k = min(self.rl_config.max_recommendations, num_available)
                 top_k_values, top_k_indices = torch.topk(available_probs, k)
                 
-                selected_indices = top_k_indices.cpu().numpy()
-                confidence_scores = top_k_values.cpu().numpy()
+                selected_indices = top_k_indices.detach().cpu().numpy()
+                confidence_scores = top_k_values.detach().cpu().numpy()
                 log_probs = torch.log(top_k_values + 1e-8).sum()
         
         # Get selected gifts

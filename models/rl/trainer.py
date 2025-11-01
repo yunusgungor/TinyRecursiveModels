@@ -140,10 +140,11 @@ class RLTrainer:
         state = self.env.reset(user_profile)
         
         # Initialize model carry
-        carry = self.model.initial_carry({
-            "inputs": torch.randn(self.model.config.seq_len),
+        dummy_batch = {
+            "inputs": torch.randint(0, self.model.config.vocab_size, (self.model.config.seq_len,)),
             "puzzle_identifiers": torch.zeros(1, dtype=torch.long)
-        })
+        }
+        carry = self.model.initial_carry(dummy_batch)
         
         experiences = []
         done = False
@@ -402,10 +403,11 @@ class RLTrainer:
                 user_profile = self._generate_random_user_profile()
                 state = self.env.reset(user_profile)
                 
-                carry = self.model.initial_carry({
-                    "inputs": torch.randn(self.model.config.seq_len),
+                dummy_batch = {
+                    "inputs": torch.randint(0, self.model.config.vocab_size, (self.model.config.seq_len,)),
                     "puzzle_identifiers": torch.zeros(1, dtype=torch.long)
-                })
+                }
+                carry = self.model.initial_carry(dummy_batch)
                 
                 episode_reward = 0.0
                 episode_length = 0
