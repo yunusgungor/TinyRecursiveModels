@@ -281,13 +281,14 @@ class MacBookTRMTrainer:
             print(f"  Fallback to streaming was used due to memory constraints")
         
         # Use MacBook-optimized DataLoader settings
+        # Set num_workers to 0 since dataset doesn't support multithreading
         dataloader = DataLoader(
             dataset,
             batch_size=None,
-            num_workers=training_params.num_workers,
-            prefetch_factor=2,  # Reduced for memory constraints
-            pin_memory=training_params.pin_memory,
-            persistent_workers=training_params.num_workers > 0
+            num_workers=0,  # Single-threaded to avoid dataset assertion error
+            prefetch_factor=None,  # Must be None when num_workers=0
+            pin_memory=False,   # Disable pin_memory for CPU training
+            persistent_workers=False
         )
         
         return dataloader, dataset.metadata
@@ -305,9 +306,11 @@ class MacBookTRMTrainer:
         Returns:
             Tuple of (model, optimizers, optimizer_lrs)
         """
+        # Use effective batch size for model configuration to handle gradient accumulation
+        effective_batch_size = training_params.effective_batch_size
         model_cfg = dict(
             **config.arch.__pydantic_extra__,  # type: ignore
-            batch_size=training_params.batch_size,
+            batch_size=effective_batch_size,  # Use effective batch size for sparse embedding
             vocab_size=train_metadata.vocab_size,
             seq_len=min(train_metadata.seq_len, training_params.max_sequence_length),
             num_puzzle_identifiers=train_metadata.num_puzzle_identifiers,
@@ -328,14 +331,8 @@ class MacBookTRMTrainer:
         if config.load_checkpoint:
             load_checkpoint(model, config)
         
-        # Model compilation (optional, may not help on CPU)
-        if training_params.enable_cpu_optimization and hasattr(torch, 'compile'):
-            try:
-                if "DISABLE_COMPILE" not in os.environ:
-                    print("Compiling model for CPU optimization...")
-                    model = torch.compile(model, mode='default')  # type: ignore
-            except Exception as e:
-                print(f"Model compilation failed: {e}")
+        # Model compilation disabled for MacBook demo to avoid tensor shape issues
+        print("Skipping model compilation for MacBook demo compatibility")
         
         # Create optimizers
         if config.arch.puzzle_emb_ndim == 0:
@@ -843,19 +840,42 @@ class MacBookTRMTrainer:
         
         # Setup wandb logging
         if self.base_config.project_name:
+            # Convert hardware_summary to serializable format
+            serializable_hardware = {
+                "macbook_optimization": True
+            }
+            
+            # Safely extract hardware info
+            try:
+                if 'cpu' in hardware_summary:
+                    serializable_hardware.update({
+                        "cpu_brand": hardware_summary['cpu'].get('brand', 'Unknown'),
+                        "cpu_cores": hardware_summary['cpu'].get('cores', 0),
+                    })
+                if 'memory' in hardware_summary:
+                    serializable_hardware.update({
+                        "memory_available_gb": hardware_summary['memory'].get('available_gb', 0),
+                    })
+            except Exception as e:
+                print(f"Warning: Could not extract hardware info for logging: {e}")
+                serializable_hardware.update({
+                    "cpu_brand": "Unknown",
+                    "cpu_cores": 0,
+                    "memory_available_gb": 0,
+                })
+            
             wandb.init(
                 project=self.base_config.project_name,
                 name=f"{self.base_config.run_name}_macbook",
                 config={
                     **config_result.adapted_config,
-                    "hardware_summary": hardware_summary,
-                    "macbook_optimization": True
+                    **serializable_hardware
                 },
                 settings=wandb.Settings(_disable_stats=True)
             )
             wandb.log({
                 "num_params": sum(x.numel() for x in macbook_state.train_state.model.parameters()),
-                "hardware_summary": hardware_summary
+                **serializable_hardware
             }, step=0)
         
         # EMA helper if enabled

@@ -1,0 +1,45 @@
+# Optimized MacBook training config - balanced performance
+defaults:
+  - arch: trm_optimized
+  - _self_
+
+hydra:
+  output_subdir: null
+
+# Data path - using our demo dataset
+data_paths: ['data/arc-demo']
+data_paths_test: ['data/arc-demo']
+
+evaluators: []  # Disable evaluators for speed
+
+# Optimized hyperparams for MacBook
+global_batch_size: 8  # Small but reasonable
+
+epochs: 6  # Reasonable number
+eval_interval: 2
+checkpoint_every_eval: True
+
+lr: 1e-4
+lr_min_ratio: 1.0
+lr_warmup_steps: 20
+
+# Standard hyperparameter settings
+beta1: 0.9
+beta2: 0.95
+weight_decay: 0.05  # Reduced
+puzzle_emb_weight_decay: 0.05
+
+# Hyperparams - Puzzle embeddings training
+puzzle_emb_lr: 1e-2
+
+seed: 42
+min_eval_interval: 0
+
+ema: False
+ema_rate: 0.999
+freeze_weights: False
+
+# MacBook-specific settings
+project_name: "MacBook-TRM-Optimized"
+run_name: "optimized-run"
+checkpoint_path: "checkpoints/optimized"

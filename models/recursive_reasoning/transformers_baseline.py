@@ -169,8 +169,9 @@ class Model_ACTV2_Inner(nn.Module):
         )
 
         # Initial states
-        self.H_init = nn.Buffer(
-            trunc_normal_init_(torch.empty(self.config.hidden_size, dtype=self.forward_dtype), std=1),
+        self.register_buffer(
+            'H_init',
+            trunc_normal_init_(torch.empty(self.config.hidden_size, dtype=self.forward_dtype, device='cpu'), std=1),
             persistent=True,
         )
 
@@ -211,6 +212,7 @@ class Model_ACTV2_Inner(nn.Module):
                 self.config.seq_len + self.puzzle_emb_len,
                 self.config.hidden_size,
                 dtype=self.forward_dtype,
+                device='cpu',
             ),
         )
 
@@ -263,8 +265,8 @@ class Model_ACTV2(nn.Module):
             inner_carry=self.inner.empty_carry(
                 batch_size
             ),  # Empty is expected, it will be reseted in first pass as all sequences are halted.
-            steps=torch.zeros((batch_size,), dtype=torch.int32),
-            halted=torch.ones((batch_size,), dtype=torch.bool),  # Default to halted
+            steps=torch.zeros((batch_size,), dtype=torch.int32, device='cpu'),
+            halted=torch.ones((batch_size,), dtype=torch.bool, device='cpu'),  # Default to halted
             current_data={k: torch.empty_like(v) for k, v in batch.items()},
         )
 

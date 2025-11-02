@@ -47,14 +47,14 @@ class CastedLinear(nn.Module):
                  out_features: int,
                  bias: bool):
         super().__init__()
-        # Truncated LeCun normal init
+        # Truncated LeCun normal init - explicitly use CPU device
         self.weight = nn.Parameter(
-            trunc_normal_init_(torch.empty((out_features, in_features)), std=1.0 / (in_features ** 0.5))
+            trunc_normal_init_(torch.empty((out_features, in_features), device='cpu'), std=1.0 / (in_features ** 0.5))
         )
         self.bias = None
         if bias:
-            # Zero init bias
-            self.bias = nn.Parameter(torch.zeros((out_features, )))
+            # Zero init bias - explicitly use CPU device
+            self.bias = nn.Parameter(torch.zeros((out_features, ), device='cpu'))
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, self.weight.to(input.dtype), bias=self.bias.to(input.dtype) if self.bias is not None else None)
@@ -69,9 +69,9 @@ class CastedEmbedding(nn.Module):
         super().__init__()
         self.cast_to = cast_to
 
-        # Truncated LeCun normal init
+        # Truncated LeCun normal init - explicitly use CPU device
         self.embedding_weight = nn.Parameter(
-            trunc_normal_init_(torch.empty((num_embeddings, embedding_dim)), std=init_std)
+            trunc_normal_init_(torch.empty((num_embeddings, embedding_dim), device='cpu'), std=init_std)
         )
         
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -82,15 +82,17 @@ class RotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position_embeddings, base, device=None):
         super().__init__()
 
-        # RoPE
+        # RoPE - default to CPU device for MacBook compatibility
+        if device is None:
+            device = 'cpu'
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.float32, device=device) / dim))
         t = torch.arange(max_position_embeddings, dtype=torch.float32, device=device)
         freqs = torch.outer(t, inv_freq)
 
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
-        self.cos_cached = nn.Buffer(emb.cos(), persistent=False)
-        self.sin_cached = nn.Buffer(emb.sin(), persistent=False)
+        self.register_buffer('cos_cached', emb.cos(), persistent=False)
+        self.register_buffer('sin_cached', emb.sin(), persistent=False)
 
     def forward(self):
         return self.cos_cached, self.sin_cached
