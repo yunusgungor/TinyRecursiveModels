@@ -1,0 +1,98 @@
+# Email Classification Training Configuration
+
+defaults:
+  - arch: trm_email
+
+# Data configuration
+data_paths:
+  - "data/email-classification"
+
+# Training configuration
+training:
+  max_steps: 10000
+  batch_size: 32
+  eval_batch_size: 64
+  seed: 42
+  
+  # Gradient settings
+  grad_clip: 1.0
+  
+  # Logging and evaluation
+  log_interval: 50
+  eval_interval: 500
+  save_interval: 1000
+  
+  # Data loading
+  epochs_per_iter: 1
+
+# Optimizer configuration
+optimizer:
+  name: "adamw"
+  lr: 1e-4
+  beta1: 0.9
+  beta2: 0.95
+  eps: 1e-8
+  weight_decay: 0.1
+  
+  # Puzzle embedding specific
+  puzzle_emb_lr: 1e-2
+  puzzle_emb_weight_decay: 0.1
+
+# Scheduler configuration
+scheduler:
+  name: "linear_warmup_cosine"
+  warmup_steps: 500
+  min_lr: 1e-6
+
+# EMA configuration
+use_ema: true
+ema_decay: 0.999
+
+# Logging configuration
+use_wandb: true
+wandb_project: "email-classification-trm"
+experiment_name: "trm_email_baseline"
+
+# Output configuration
+output_dir: "outputs/email_classification"
+
+# Model architecture overrides (from arch/trm_email.yaml)
+arch:
+  # Core model parameters
+  hidden_size: 256  # Smaller for faster training
+  num_heads: 8
+  L_layers: 2
+  expansion: 4
+  
+  # Recursive reasoning
+  H_cycles: 2
+  L_cycles: 3
+  halt_max_steps: 6
+  halt_exploration_prob: 0.1
+  
+  # Email-specific
+  num_email_categories: 10
+  use_category_embedding: true
+  classification_dropout: 0.1
+  
+  # Position encoding
+  pos_enc: "rope"
+  
+  # Model variant
+  mlp_t: false
+  
+  # Embedding
+  embed_scale: true
+  init_std: 1.0
+  
+  # Training dtype
+  forward_dtype: "bfloat16"
+  
+  # ACT parameters
+  no_ACT_continue: true
+
+# Distributed training (set by torchrun)
+# RANK, WORLD_SIZE, LOCAL_RANK will be set by environment
+
+# Hardware optimization
+compile_model: false  # Set to true for PyTorch 2.0+ compilation

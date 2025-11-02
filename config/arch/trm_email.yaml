@@ -1,0 +1,63 @@
+# Configuration for TRM Email Classification Model
+
+# Model architecture
+_target_: models.recursive_reasoning.trm_email.EmailTRM
+
+# Email-specific configuration
+num_email_categories: 10  # newsletter, work, personal, spam, promotional, social, finance, travel, shopping, other
+use_category_embedding: true
+classification_dropout: 0.1
+
+# Core TRM parameters optimized for email classification
+vocab_size: 5000  # Will be set dynamically based on dataset
+hidden_size: 512
+num_heads: 8
+L_layers: 2  # Number of transformer/MLP layers
+expansion: 4  # MLP expansion factor
+
+# Recursive reasoning parameters
+H_cycles: 2  # High-level reasoning cycles (reduced for faster inference)
+L_cycles: 4  # Low-level reasoning cycles
+halt_max_steps: 8  # Maximum halting steps
+halt_exploration_prob: 0.1  # Exploration probability during training
+
+# Position encoding
+pos_enc: "rope"  # rope, learned, or none
+
+# Model variant
+mlp_t: false  # Use transformer layers instead of MLP-only
+
+# Embedding parameters
+embed_scale: true  # Scale embeddings by sqrt(hidden_size)
+init_std: 1.0  # Initialization standard deviation
+
+# Training parameters
+forward_dtype: "bfloat16"  # Use bfloat16 for memory efficiency
+
+# ACT (Adaptive Computation Time) parameters
+no_ACT_continue: true  # Simplified halting without continue loss
+
+# Puzzle embedding parameters (for email identifiers)
+puzzle_emb_lr: 1e-2  # Learning rate for puzzle embeddings
+puzzle_emb_weight_decay: 0.1  # Weight decay for puzzle embeddings
+
+# Sequence length
+max_seq_len: 512  # Maximum email sequence length
+
+# Special token IDs (should match dataset preprocessing)
+pad_id: 0
+eos_id: 1
+unk_id: 2
+
+# Email category mapping
+email_categories:
+  newsletter: 0
+  work: 1
+  personal: 2
+  spam: 3
+  promotional: 4
+  social: 5
+  finance: 6
+  travel: 7
+  shopping: 8
+  other: 9
