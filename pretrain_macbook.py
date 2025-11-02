@@ -44,6 +44,9 @@ from macbook_optimization.cpu_optimization import CPUOptimizer, TensorOperationO
 from macbook_optimization.resource_monitoring import ResourceMonitor
 from macbook_optimization.training_config_adapter import TrainingConfigAdapter, ConfigurationResult
 from macbook_optimization.config_validation import ConfigurationValidator
+from macbook_optimization.dataset_management import (
+    DatasetManager, DatasetManagementConfig, create_memory_efficient_dataloader
+)
 
 # Import original config classes
 from pretrain import (
@@ -104,6 +107,17 @@ class MacBookTRMTrainer:
         self.resource_monitor = ResourceMonitor()
         self.config_adapter = TrainingConfigAdapter(self.hardware_detector)
         self.validator = ConfigurationValidator(self.hardware_detector)
+        
+        # Initialize dataset management
+        dataset_config = DatasetManagementConfig(
+            max_dataset_memory_mb=800.0,  # Conservative for MacBook
+            streaming_threshold_mb=400.0,
+            cache_threshold_mb=200.0,
+            chunk_size_mb=50.0,
+            enable_caching=True,
+            auto_fallback_streaming=True
+        )
+        self.dataset_manager = DatasetManager(dataset_config, self.memory_manager)
         
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -197,7 +211,7 @@ class MacBookTRMTrainer:
     def create_macbook_dataloader(self, config: PretrainConfig, split: str, 
                                  training_params, **kwargs) -> tuple:
         """
-        Create MacBook-optimized dataloader.
+        Create MacBook-optimized dataloader with memory-efficient dataset management.
         
         Args:
             config: Training configuration
@@ -208,13 +222,38 @@ class MacBookTRMTrainer:
         Returns:
             Tuple of (dataloader, metadata)
         """
-        dataset = PuzzleDataset(PuzzleDatasetConfig(
+        # Determine dataset paths
+        dataset_paths = (config.data_paths_test 
+                        if len(config.data_paths_test) > 0 and split == "test" 
+                        else config.data_paths)
+        
+        # Validate dataset memory constraints
+        validation = self.dataset_manager.validate_dataset_memory_constraints(
+            dataset_paths, training_params.batch_size, split
+        )
+        
+        if not validation['memory_constraints_met']:
+            print(f"Dataset memory constraints not met for {split} split:")
+            for rec in validation['recommendations']:
+                print(f"  - {rec}")
+        
+        # Create PuzzleDatasetConfig
+        puzzle_config = PuzzleDatasetConfig(
             seed=config.seed,
-            dataset_paths=config.data_paths_test if len(config.data_paths_test) > 0 and split == "test" else config.data_paths,
+            dataset_paths=dataset_paths,
             rank=0,  # Single process for MacBook
             num_replicas=1,
             **kwargs
-        ), split=split)
+        )
+        
+        # Create memory-efficient dataset
+        dataset, creation_info = self.dataset_manager.create_dataloader_with_fallback(
+            dataset_paths, puzzle_config, split
+        )
+        
+        print(f"Created {split} dataset using {creation_info['final_strategy']} strategy")
+        if creation_info['fallback_used']:
+            print(f"  Fallback to streaming was used due to memory constraints")
         
         # Use MacBook-optimized DataLoader settings
         dataloader = DataLoader(
@@ -568,6 +607,15 @@ class MacBookTRMTrainer:
         # Adapt configuration
         config_result = self.adapt_configuration(dataset_size)
         
+        # Analyze dataset requirements before creating dataloaders
+        train_analysis = self.dataset_manager.analyze_dataset_requirements(
+            self.base_config.data_paths, "train"
+        )
+        print(f"Training dataset analysis:")
+        print(f"  Total size: {train_analysis['total_size_mb']:.1f}MB")
+        print(f"  Recommended strategy: {train_analysis['recommended_strategy']}")
+        print(f"  Memory utilization: {train_analysis['memory_utilization_percent']:.1f}%")
+        
         # Create dataloaders
         train_epochs_per_iter = (
             self.base_config.eval_interval 
@@ -583,6 +631,14 @@ class MacBookTRMTrainer:
         )
         
         try:
+            if self.base_config.data_paths_test:
+                test_analysis = self.dataset_manager.analyze_dataset_requirements(
+                    self.base_config.data_paths_test, "test"
+                )
+                print(f"Test dataset analysis:")
+                print(f"  Total size: {test_analysis['total_size_mb']:.1f}MB")
+                print(f"  Recommended strategy: {test_analysis['recommended_strategy']}")
+            
             eval_loader, eval_metadata = self.create_macbook_dataloader(
                 self.base_config, "test", config_result.training_params,
                 test_set_mode=True, epochs_per_iter=1,
@@ -642,9 +698,25 @@ class MacBookTRMTrainer:
                 
                 # Training phase
                 macbook_state.train_state.model.train()
+                batch_count = 0
                 for set_name, batch, global_batch_size in train_loader:
                     if self._shutdown_requested:
                         break
+                    
+                    batch_count += 1
+                    
+                    # Monitor dataset memory usage periodically
+                    if batch_count % 50 == 0:  # Every 50 batches
+                        dataset_memory_stats = self.dataset_manager.monitor_dataset_memory_usage(
+                            f"train_epoch_{iter_id}_batch_{batch_count}"
+                        )
+                        
+                        # Log dataset memory metrics
+                        if self.base_config.project_name:
+                            wandb.log({
+                                "dataset_memory_mb": dataset_memory_stats['memory_usage']['used_mb'],
+                                "dataset_memory_percent": dataset_memory_stats['memory_usage']['percent_used']
+                            }, step=macbook_state.train_state.step)
                     
                     metrics = self.train_batch_macbook(
                         macbook_state, batch, config_result.training_params
@@ -716,6 +788,7 @@ class MacBookTRMTrainer:
         """Print comprehensive training summary."""
         total_time = time.time() - macbook_state.start_time
         memory_summary = self.memory_manager.get_memory_summary()
+        dataset_metrics = self.dataset_manager.get_loading_metrics()
         
         print("\n" + "="*60)
         print("MacBook TRM Training Summary")
@@ -730,11 +803,19 @@ class MacBookTRMTrainer:
         print(f"  Model memory: {memory_summary['tracking']['model_mb']:.0f}MB")
         print(f"  Training overhead: {memory_summary['tracking']['training_overhead_mb']:.0f}MB")
         
+        print(f"\nDataset Management:")
+        if dataset_metrics:
+            for i, metrics in enumerate(dataset_metrics):
+                print(f"  Dataset {i+1}: {metrics.total_size_mb:.1f}MB, "
+                      f"strategy: {metrics.loading_strategy}, "
+                      f"memory usage: {metrics.memory_usage_mb:.1f}MB")
+        
         if macbook_state.training_metrics['loss']:
             final_loss = macbook_state.training_metrics['loss'][-1]
             print(f"\nFinal training loss: {final_loss:.4f}")
         
         print("\nHardware utilization was optimized for MacBook CPU training.")
+        print("Dataset loading was optimized for memory constraints.")
         print("="*60)
 
 
