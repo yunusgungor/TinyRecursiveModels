@@ -131,3 +131,5 @@ dmypy.json
 data/
 test_checkpoints/
 test_data/
+checkpoints/
+wandb/

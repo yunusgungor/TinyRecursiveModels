@@ -9,6 +9,7 @@ arch:
   # Base TRM parameters
   hidden_size: 256
   L_layers: 2
+  H_layers: 2
   H_cycles: 3
   L_cycles: 4
   num_heads: 8
@@ -43,7 +44,7 @@ arch:
   
   # Tool-specific parameters
   max_tool_calls_per_step: 3
-  tool_call_threshold: 0.5
+  tool_call_threshold: 0.1
   tool_result_encoding_dim: 128
   tool_selection_method: "confidence"  # "confidence", "random", "round_robin"
   
@@ -52,7 +53,7 @@ arch:
   tool_attention_heads: 4
   
   # Tool training parameters
-  tool_usage_reward_weight: 0.1
+  tool_usage_reward_weight: 0.5
   tool_efficiency_penalty: 0.05
 
 # Training parameters

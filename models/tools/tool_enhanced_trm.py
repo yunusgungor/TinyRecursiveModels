@@ -167,7 +167,7 @@ class ToolEnhancedTRM(RLEnhancedTRM):
             # In a real implementation, this would be more sophisticated
             return {
                 "product_name": self._extract_product_name_from_context(env_state),
-                "max_sites": min(5, max(2, int(param_encoding[0, 0].item() * 10))),
+                "max_sites": min(5, max(2, int(param_encoding[0].item() * 10) if param_encoding.dim() > 0 else 3)),
                 "category": self._infer_category_from_hobbies(user_profile.hobbies)
             }
             
@@ -180,7 +180,7 @@ class ToolEnhancedTRM(RLEnhancedTRM):
         elif tool_name == "review_analysis":
             return {
                 "product_id": "default_product",
-                "max_reviews": min(200, max(50, int(param_encoding[0, 1].item() * 300))),
+                "max_reviews": min(200, max(50, int(param_encoding[1].item() * 300) if param_encoding.dim() > 1 else int(param_encoding[0].item() * 300))),
                 "language": "tr"
             }
             
@@ -314,7 +314,11 @@ class ToolEnhancedTRM(RLEnhancedTRM):
         
         # Convert to tensor and encode
         feature_tensor = torch.tensor(features, dtype=torch.float32, device=device)
+        # Add batch dimension for encoder
+        feature_tensor = feature_tensor.unsqueeze(0)  # [1, feature_dim]
         encoded_result = self.tool_result_encoder(feature_tensor)
+        # Remove batch dimension
+        encoded_result = encoded_result.squeeze(0)  # [hidden_size]
         
         return encoded_result
     
@@ -337,11 +341,45 @@ class ToolEnhancedTRM(RLEnhancedTRM):
         tool_stack = torch.stack(tool_encodings, dim=0).unsqueeze(0)  # [1, num_tools, hidden_size]
         
         if self.tool_config.tool_fusion_method == "concatenate":
-            # Simple concatenation and projection
-            combined = torch.cat([hidden_state, tool_stack.mean(dim=1)], dim=-1)
-            # Project back to hidden size
-            projection = nn.Linear(combined.size(-1), hidden_state.size(-1)).to(hidden_state.device)
-            return projection(combined)
+            # Robust tool fusion with proper dimension handling
+            
+            # Get tool summary - average across tools
+            tool_summary = tool_stack.mean(dim=1)  # [1, tool_encoding_dim]
+            
+            # Store original hidden state shape
+            original_shape = hidden_state.shape
+            batch_size = hidden_state.size(0) if hidden_state.dim() > 1 else 1
+            hidden_size = hidden_state.size(-1)
+            
+            # Ensure both tensors are 2D for processing
+            if hidden_state.dim() == 1:
+                hidden_state = hidden_state.unsqueeze(0)  # [1, hidden_size]
+            if tool_summary.dim() == 1:
+                tool_summary = tool_summary.unsqueeze(0)  # [1, tool_encoding_dim]
+            
+            # Ensure tool_summary matches hidden_state's last dimension
+            if tool_summary.size(-1) != hidden_size:
+                if not hasattr(self, 'tool_projection'):
+                    self.tool_projection = nn.Linear(tool_summary.size(-1), hidden_size).to(hidden_state.device)
+                tool_summary = self.tool_projection(tool_summary)
+            
+            # Ensure batch dimensions match
+            if tool_summary.size(0) != hidden_state.size(0):
+                tool_summary = tool_summary.expand(hidden_state.size(0), -1)
+            
+            # Concatenate along feature dimension
+            combined = torch.cat([hidden_state, tool_summary], dim=-1)  # [batch, hidden_size * 2]
+            
+            # Project back to original hidden size
+            if not hasattr(self, 'fusion_projection'):
+                self.fusion_projection = nn.Linear(combined.size(-1), hidden_size).to(hidden_state.device)
+            result = self.fusion_projection(combined)
+            
+            # Restore original shape
+            if len(original_shape) == 1:
+                result = result.squeeze(0)
+            
+            return result
             
         elif self.tool_config.tool_fusion_method == "attention":
             # Attention-based fusion
@@ -419,7 +457,21 @@ class ToolEnhancedTRM(RLEnhancedTRM):
         # Final forward pass with tool-enhanced state
         if tool_encodings:
             # Update carry with tool-enhanced hidden state
-            carry.inner_carry.z_H = current_hidden.unsqueeze(1).expand_as(carry.inner_carry.z_H)
+            # Ensure dimensions match before updating carry
+            if hasattr(carry, 'z_H'):
+                target_shape = carry.z_H.shape
+                
+                if current_hidden.dim() == 1:
+                    # Reshape to match target dimensions
+                    if len(target_shape) == 3:  # [batch, seq, hidden]
+                        current_hidden = current_hidden.unsqueeze(0).unsqueeze(0).expand(target_shape)
+                    elif len(target_shape) == 2:  # [batch, hidden]
+                        current_hidden = current_hidden.unsqueeze(0).expand(target_shape)
+                elif current_hidden.dim() == 2 and len(target_shape) == 3:
+                    # Add sequence dimension
+                    current_hidden = current_hidden.unsqueeze(1).expand(target_shape)
+                
+                carry.z_H = current_hidden
             
             # Re-run RL forward with updated state
             final_output = self.forward_rl(carry, env_state, available_gifts)

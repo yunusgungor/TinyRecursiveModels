@@ -9,6 +9,7 @@ arch:
   # Base TRM parameters
   hidden_size: 256
   L_layers: 2
+  H_layers: 2
   H_cycles: 3
   L_cycles: 4
   num_heads: 8

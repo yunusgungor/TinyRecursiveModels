@@ -1,0 +1,147 @@
+# Ultra Debug Mode - Minimal Tool-Enhanced Configuration for macOS
+
+# Model architecture - Çok küçük boyutlar
+arch:
+  name: "models.tools.tool_enhanced_trm@ToolEnhancedTRM"
+  loss:
+    name: "models.losses.supervised_loss@SupervisedLoss"
+  
+  # Minimal TRM parameters
+  hidden_size: 64  # 128'den 64'e düşürdük
+  L_layers: 1
+  H_layers: 0  # H layer'ları tamamen kaldırdık
+  H_cycles: 1
+  L_cycles: 1
+  num_heads: 1
+  expansion: 1.5  # 2.0'dan düşürdük
+  pos_encodings: "rope"
+  rms_norm_eps: 1e-5
+  rope_theta: 10000.0
+  
+  # ACT parameters - Minimal
+  halt_max_steps: 1  # 2'den 1'e
+  halt_exploration_prob: 0.0  # Exploration'ı kapattık
+  no_ACT_continue: true
+  
+  # RL-specific parameters - Küçük
+  action_space_size: 5  # 10'dan 5'e
+  max_recommendations: 1  # 2'den 1'e
+  value_head_hidden: 16  # 32'den 16'ya
+  policy_head_hidden: 16  # 32'den 16'ya
+  reward_prediction: false  # Kapatıldı
+  reward_head_hidden: 16
+  
+  # Action selection
+  action_selection_method: "top_k"
+  epsilon: 0.0  # Exploration yok
+  temperature: 1.0
+  
+  # PPO parameters - Basit
+  ppo_clip_ratio: 0.2
+  value_loss_coef: 0.5
+  entropy_coef: 0.0  # Entropy'yi kapattık
+  max_grad_norm: 1.0
+  
+  # Tool-specific parameters - Minimal
+  max_tool_calls_per_step: 1  # 3'ten 1'e
+  tool_call_threshold: 0.01  # Çok düşük threshold
+  tool_result_encoding_dim: 32  # 64'ten 32'ye
+  tool_selection_method: "confidence"
+  
+  # Tool integration - Basit
+  tool_fusion_method: "concatenate"
+  tool_attention_heads: 1
+  
+  # Tool training parameters
+  tool_usage_reward_weight: 1.0  # Çok yüksek reward
+  tool_efficiency_penalty: 0.0
+
+# Training parameters - Minimal
+global_batch_size: 2  # 16'dan 2'ye
+epochs: 100
+lr: 1e-3  # Daha yüksek learning rate
+lr_min_ratio: 0.5
+lr_warmup_steps: 5  # 100'den 5'e
+weight_decay: 0.0  # Kapatıldı
+beta1: 0.9
+beta2: 0.95
+
+# RL Training specific - Ultra minimal
+rl_training:
+  num_episodes: 10  # 3000'den 10'a!
+  max_steps_per_episode: 5  # 10'dan 5'e
+  batch_size: 2  # 32'den 2'ye
+  gamma: 0.9  # 0.99'dan düşürdük
+  ppo_epochs: 1  # 4'ten 1'e - Bu çok önemli!
+  experience_buffer_size: 50  # 15000'den 50'ye
+  min_experiences_for_update: 10  # 150'den 10'a
+  eval_frequency: 5  # 50'den 5'e
+  eval_episodes: 2  # 15'ten 2'ye
+  enable_tools: true
+  tool_usage_reward_weight: 1.0
+
+# Tool configuration - Basit
+tools:
+  enable_caching: false  # Cache kapatıldı
+  cache_ttl: 60
+  max_concurrent_calls: 1
+  timeout: 5  # 30'dan 5'e
+  
+  # Sadece 2 tool
+  available_tools:
+    - "price_comparison"
+    - "inventory_check"
+
+# Data paths
+data_paths: ["data/gift_recommendation_train"]
+data_paths_test: ["data/gift_recommendation_test"]
+
+# Environment
+environment:
+  gift_catalog_path: "data/gift_catalog.json"
+  user_feedback_path: "data/user_feedback.json"
+
+# Evaluation - Minimal
+eval_interval: 5  # 100'den 5'e
+min_eval_interval: 5
+evaluators: []
+
+# Checkpointing
+checkpoint_every_eval: true
+checkpoint_path: "checkpoints/ultra_debug_tool_enhanced"
+project_name: "UltraDebug-Tool-Enhanced-TRM"
+run_name: null
+
+# Logging - Minimal
+log_frequency: 2  # 10'dan 2'ye
+save_frequency: 5  # 100'den 5'e
+wandb_project: "ultra-debug-tools"
+
+# Device settings
+device: "cpu"
+forward_dtype: "float32"
+
+# Multi-phase training - Ultra hızlı
+training_phases:
+  # Phase 1: Supervised pre-training
+  phase1:
+    name: "supervised_pretraining"
+    epochs: 5  # 500'den 5'e!
+    enable_tools: false
+    enable_rl: false
+    
+  # Phase 2: Tool usage learning
+  phase2:
+    name: "tool_learning"
+    epochs: 5  # 300'den 5'e!
+    enable_tools: true
+    enable_rl: false
+    tool_learning_rate: 1e-3
+    
+  # Phase 3: RL fine-tuning with tools
+  phase3:
+    name: "rl_finetuning"
+    epochs: 5  # 700'den 5'e!
+    enable_tools: true
+    enable_rl: true
+    rl_learning_rate: 1e-3

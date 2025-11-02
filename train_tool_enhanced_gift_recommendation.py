@@ -44,8 +44,11 @@ def create_model_config(config_dict):
         "seq_len": 50,
         "vocab_size": 1000,
         "num_puzzle_identifiers": 1,
+        "puzzle_emb_ndim": 0,
+        "puzzle_emb_len": 0,
         "hidden_size": arch_config["hidden_size"],
         "L_layers": arch_config["L_layers"],
+        "H_layers": arch_config["H_layers"],
         "H_cycles": arch_config["H_cycles"],
         "L_cycles": arch_config["L_cycles"],
         "num_heads": arch_config["num_heads"],
@@ -110,7 +113,7 @@ def create_training_config(config_dict, phase="full"):
         num_episodes=epochs,
         max_steps_per_episode=rl_config["max_steps_per_episode"],
         batch_size=rl_config["batch_size"],
-        learning_rate=config_dict["lr"],
+        learning_rate=float(config_dict["lr"]),
         gamma=rl_config["gamma"],
         ppo_epochs=rl_config["ppo_epochs"],
         clip_ratio=config_dict["arch"]["ppo_clip_ratio"],
@@ -192,20 +195,40 @@ def main():
     
     # Debug mode adjustments
     if args.debug:
-        print("Debug mode enabled - reducing model size and training duration")
-        config["arch"]["hidden_size"] = 128
+        print("Debug mode enabled - ULTRA FAST training for macOS debugging")
+        # Ultra minimal model
+        config["arch"]["hidden_size"] = 64
         config["arch"]["L_layers"] = 1
-        config["arch"]["H_cycles"] = 2
-        config["arch"]["L_cycles"] = 2
-        config["rl_training"]["num_episodes"] = 100
-        config["rl_training"]["batch_size"] = 8
-        config["rl_training"]["eval_frequency"] = 20
-        config["global_batch_size"] = 4
+        config["arch"]["H_layers"] = 0  # No H layers
+        config["arch"]["H_cycles"] = 1
+        config["arch"]["L_cycles"] = 1
+        config["arch"]["num_heads"] = 1
+        config["arch"]["value_head_hidden"] = 16
+        config["arch"]["policy_head_hidden"] = 16
+        config["arch"]["action_space_size"] = 5
+        config["arch"]["max_recommendations"] = 1
+        config["arch"]["halt_max_steps"] = 1
+        config["arch"]["tool_result_encoding_dim"] = 32
+        config["arch"]["max_tool_calls_per_step"] = 1
+        config["arch"]["tool_usage_reward_weight"] = 1.0
+        config["arch"]["entropy_coef"] = 0.0
+        config["arch"]["tool_call_threshold"] = 0.01
         
-        # Reduce phase durations
+        # Ultra fast training
+        config["rl_training"]["num_episodes"] = 10
+        config["rl_training"]["batch_size"] = 2
+        config["rl_training"]["ppo_epochs"] = 1  # Critical: single PPO epoch
+        config["rl_training"]["experience_buffer_size"] = 20
+        config["rl_training"]["min_experiences_for_update"] = 5
+        config["rl_training"]["eval_frequency"] = 5
+        config["rl_training"]["eval_episodes"] = 2
+        config["global_batch_size"] = 2
+        config["log_frequency"] = 2
+        
+        # Ultra short phases
         if "training_phases" in config:
             for phase_config in config["training_phases"].values():
-                phase_config["epochs"] = min(50, phase_config.get("epochs", 100))
+                phase_config["epochs"] = 5  # Fixed 5 epochs per phase
     
     # Setup data files
     catalog_path = setup_data_files()

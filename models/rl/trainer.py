@@ -17,7 +17,6 @@ from collections import deque
 
 from .environment import GiftRecommendationEnvironment, UserProfile, EnvironmentState
 from .rl_trm import RLEnhancedTRM
-from models.tools.tool_enhanced_trm import ToolEnhancedTRM
 
 
 @dataclass
@@ -69,6 +68,21 @@ class Experience:
     carry: Any
     available_gifts: List[Any]
     tool_calls: List[Any] = None
+    
+    def detach_tensors(self):
+        """Detach all tensors from gradient graph to avoid PPO issues"""
+        if isinstance(self.log_prob, torch.Tensor):
+            self.log_prob = self.log_prob.detach()
+        if isinstance(self.value, torch.Tensor):
+            self.value = self.value.detach()
+        
+        # Detach carry tensors if it's a TRM carry object
+        if hasattr(self.carry, '__dict__'):
+            for key, value in self.carry.__dict__.items():
+                if isinstance(value, torch.Tensor):
+                    setattr(self.carry, key, value.detach())
+        
+        return self
 
 
 class RLTrainer:
@@ -155,6 +169,8 @@ class RLTrainer:
             available_gifts = state.available_gifts
             
             # Forward pass through model
+            # Import ToolEnhancedTRM at runtime to avoid circular import
+            from models.tools.tool_enhanced_trm import ToolEnhancedTRM
             if isinstance(self.model, ToolEnhancedTRM) and self.config.enable_tools:
                 new_carry, rl_output, tool_calls = self.model.forward_with_tools(
                     carry, state, available_gifts
@@ -199,6 +215,9 @@ class RLTrainer:
                 available_gifts=available_gifts,
                 tool_calls=tool_calls if tool_calls else None
             )
+            
+            # Detach tensors to prevent gradient graph issues in PPO
+            experience.detach_tensors()
             
             experiences.append(experience)
             
@@ -285,7 +304,9 @@ class RLTrainer:
             entropies = []
             
             for exp in experiences:
-                # Forward pass
+                # Forward pass - experiences are already detached
+                from models.tools.tool_enhanced_trm import ToolEnhancedTRM
+                
                 if isinstance(self.model, ToolEnhancedTRM) and self.config.enable_tools:
                     _, rl_output, _ = self.model.forward_with_tools(
                         exp.carry, exp.state, exp.available_gifts
@@ -300,9 +321,15 @@ class RLTrainer:
                 # Compute log probability for taken action
                 action_probs = rl_output["action_probs"]
                 if exp.action["action_indices"]:
-                    action_log_prob = torch.log(
-                        action_probs[0, exp.action["action_indices"]] + 1e-8
-                    ).sum()
+                    # Handle both 1D and 2D action_probs tensors
+                    if action_probs.dim() == 1:
+                        action_log_prob = torch.log(
+                            action_probs[exp.action["action_indices"]] + 1e-8
+                        ).sum()
+                    else:
+                        action_log_prob = torch.log(
+                            action_probs[0, exp.action["action_indices"]] + 1e-8
+                        ).sum()
                 else:
                     action_log_prob = torch.tensor(0.0)
                 
@@ -417,6 +444,7 @@ class RLTrainer:
                 while not done and episode_length < self.config.max_steps_per_episode:
                     available_gifts = state.available_gifts
                     
+                    from models.tools.tool_enhanced_trm import ToolEnhancedTRM
                     if isinstance(self.model, ToolEnhancedTRM) and self.config.enable_tools:
                         new_carry, rl_output, tool_calls = self.model.forward_with_tools(
                             carry, state, available_gifts
@@ -485,7 +513,14 @@ class RLTrainer:
         checkpoint = torch.load(filepath, map_location="cpu")
         
         self.model.load_state_dict(checkpoint["model_state_dict"])
-        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        
+        # Try to load optimizer state, but reset if incompatible
+        try:
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        except (ValueError, RuntimeError) as e:
+            print(f"Warning: Could not load optimizer state ({e}). Resetting optimizer.")
+            # Reset optimizer with current model parameters
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
         self.training_step = checkpoint["training_step"]
         self.episode_count = checkpoint["episode_count"]
         self.episode_rewards = checkpoint["episode_rewards"]

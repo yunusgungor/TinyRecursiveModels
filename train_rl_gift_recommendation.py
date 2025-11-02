@@ -44,8 +44,11 @@ def create_model_config(config_dict):
         "seq_len": 50,  # Fixed for gift recommendation
         "vocab_size": 1000,  # Fixed vocabulary size
         "num_puzzle_identifiers": 1,
+        "puzzle_emb_ndim": 0,
+        "puzzle_emb_len": 0,
         "hidden_size": arch_config["hidden_size"],
         "L_layers": arch_config["L_layers"],
+        "H_layers": arch_config["H_layers"],
         "H_cycles": arch_config["H_cycles"],
         "L_cycles": arch_config["L_cycles"],
         "num_heads": arch_config["num_heads"],
@@ -89,7 +92,7 @@ def create_training_config(config_dict):
         num_episodes=rl_config["num_episodes"],
         max_steps_per_episode=rl_config["max_steps_per_episode"],
         batch_size=rl_config["batch_size"],
-        learning_rate=config_dict["lr"],
+        learning_rate=float(config_dict["lr"]),
         gamma=rl_config["gamma"],
         ppo_epochs=rl_config["ppo_epochs"],
         clip_ratio=config_dict["arch"]["ppo_clip_ratio"],
