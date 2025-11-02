@@ -1,0 +1,150 @@
+# Fast Tool-Enhanced Training - 10 minutes target
+
+# Model architecture - Optimized for speed but effective
+arch:
+  name: "models.tools.tool_enhanced_trm@ToolEnhancedTRM"
+  loss:
+    name: "models.losses.supervised_loss@SupervisedLoss"
+  
+  # Balanced TRM parameters
+  hidden_size: 128  # Good balance
+  L_layers: 1
+  H_layers: 1  # Add H layer for better learning
+  H_cycles: 2
+  L_cycles: 2
+  num_heads: 4  # More heads for better attention
+  expansion: 2.0
+  pos_encodings: "rope"
+  rms_norm_eps: 1e-5
+  rope_theta: 10000.0
+  
+  # ACT parameters
+  halt_max_steps: 3
+  halt_exploration_prob: 0.1
+  no_ACT_continue: true
+  
+  # RL-specific parameters
+  action_space_size: 20  # More actions for flexibility
+  max_recommendations: 3
+  value_head_hidden: 64
+  policy_head_hidden: 64
+  reward_prediction: true
+  reward_head_hidden: 64
+  
+  # Action selection
+  action_selection_method: "top_k"
+  epsilon: 0.1
+  temperature: 1.0
+  
+  # PPO parameters
+  ppo_clip_ratio: 0.2
+  value_loss_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+  
+  # Tool-specific parameters - Optimized
+  max_tool_calls_per_step: 2
+  tool_call_threshold: 0.3  # Balanced threshold
+  tool_result_encoding_dim: 64
+  tool_selection_method: "confidence"
+  
+  # Tool integration
+  tool_fusion_method: "concatenate"
+  tool_attention_heads: 2
+  
+  # Tool training parameters
+  tool_usage_reward_weight: 0.3  # Strong tool incentive
+  tool_efficiency_penalty: 0.02
+
+# Training parameters - Fast but effective
+global_batch_size: 8  # Balanced batch size
+epochs: 100
+lr: 2e-4  # Higher learning rate for faster learning
+lr_min_ratio: 0.1
+lr_warmup_steps: 20
+weight_decay: 0.01
+beta1: 0.9
+beta2: 0.95
+
+# RL Training specific - Fast convergence
+rl_training:
+  num_episodes: 100  # Fast episodes per phase
+  max_steps_per_episode: 10
+  batch_size: 16
+  gamma: 0.95  # Slightly lower for faster learning
+  ppo_epochs: 2  # Fewer PPO epochs for speed
+  experience_buffer_size: 1000
+  min_experiences_for_update: 50
+  eval_frequency: 20  # More frequent evaluation
+  eval_episodes: 5
+  enable_tools: true
+  tool_usage_reward_weight: 0.3
+
+# Tool configuration
+tools:
+  enable_caching: true
+  cache_ttl: 1800
+  max_concurrent_calls: 3
+  timeout: 10
+  
+  # All 5 tools
+  available_tools:
+    - "price_comparison"
+    - "inventory_check"
+    - "review_analysis"
+    - "trend_analysis"
+    - "budget_optimizer"
+
+# Data paths
+data_paths: ["data/gift_recommendation_train"]
+data_paths_test: ["data/gift_recommendation_test"]
+
+# Environment
+environment:
+  gift_catalog_path: "data/gift_catalog.json"
+  user_feedback_path: "data/user_feedback.json"
+
+# Evaluation
+eval_interval: 20
+min_eval_interval: 10
+evaluators: []
+
+# Checkpointing
+checkpoint_every_eval: true
+checkpoint_path: "checkpoints/fast_tool_enhanced"
+project_name: "Fast-Tool-Enhanced-TRM"
+run_name: null
+
+# Logging
+log_frequency: 5
+save_frequency: 20
+wandb_project: "fast-tool-enhanced"
+
+# Device settings
+device: "cpu"
+forward_dtype: "float32"
+
+# Multi-phase training - Fast but comprehensive
+training_phases:
+  # Phase 1: Quick supervised pre-training
+  phase1:
+    name: "supervised_pretraining"
+    epochs: 50  # Quick baseline
+    enable_tools: false
+    enable_rl: false
+    
+  # Phase 2: Rapid tool learning
+  phase2:
+    name: "tool_learning"
+    epochs: 50  # Learn tool usage quickly
+    enable_tools: true
+    enable_rl: false
+    tool_learning_rate: 2e-4
+    
+  # Phase 3: Fast RL fine-tuning
+  phase3:
+    name: "rl_finetuning"
+    epochs: 100  # Polish with RL
+    enable_tools: true
+    enable_rl: true
+    rl_learning_rate: 1e-4
