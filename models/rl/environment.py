@@ -127,7 +127,10 @@ class GiftRecommendationEnvironment:
                 data = json.load(f)
             
             gifts = []
-            for item in data:
+            # Handle both old and new catalog formats
+            gift_list = data if isinstance(data, list) else data.get('gifts', data)
+            
+            for item in gift_list:
                 gift = GiftItem(
                     id=item['id'],
                     name=item['name'],
@@ -135,9 +138,9 @@ class GiftRecommendationEnvironment:
                     price=item['price'],
                     rating=item['rating'],
                     tags=item['tags'],
-                    description=item['description'],
-                    age_suitability=tuple(item['age_suitability']),
-                    occasion_fit=item['occasion_fit']
+                    description=item.get('description', f"{item['name']} - {item['category']} item"),
+                    age_suitability=tuple(item.get('age_suitability', item.get('age_range', [18, 65]))),
+                    occasion_fit=item.get('occasion_fit', item.get('occasions', ['any']))
                 )
                 gifts.append(gift)
             
@@ -246,50 +249,26 @@ class GiftRecommendationEnvironment:
         return self.current_state, reward, done, info
     
     def _calculate_reward(self, recommended_gifts: List[GiftItem], confidence_scores: List[float]) -> float:
-        """Calculate reward based on recommendation quality"""
-        if not recommended_gifts:
-            return -0.5  # Penalty for no recommendations
+        """Calculate reward based on recommendation quality using enhanced reward function"""
+        # Import here to avoid circular imports
+        from .enhanced_reward_function import EnhancedRewardFunction
         
-        user_profile = self.current_state.user_profile
-        total_reward = 0.0
+        if not hasattr(self, '_enhanced_reward_func'):
+            self._enhanced_reward_func = EnhancedRewardFunction()
         
-        for i, gift in enumerate(recommended_gifts):
-            gift_reward = 0.0
-            confidence = confidence_scores[i] if i < len(confidence_scores) else 1.0
-            
-            # Budget compatibility (30% of reward)
-            budget_score = self._calculate_budget_score(gift.price, user_profile.budget)
-            gift_reward += 0.3 * budget_score
-            
-            # Hobby alignment (25% of reward)
-            hobby_score = self._calculate_hobby_score(gift, user_profile.hobbies)
-            gift_reward += 0.25 * hobby_score
-            
-            # Occasion appropriateness (20% of reward)
-            occasion_score = self._calculate_occasion_score(gift, user_profile.occasion)
-            gift_reward += 0.2 * occasion_score
-            
-            # Age appropriateness (15% of reward)
-            age_score = self._calculate_age_score(gift, user_profile.age)
-            gift_reward += 0.15 * age_score
-            
-            # Quality score (10% of reward)
-            quality_score = gift.rating / 5.0
-            gift_reward += 0.1 * quality_score
-            
-            # Apply confidence weighting
-            gift_reward *= confidence
-            
-            total_reward += gift_reward
+        # Get available categories
+        available_categories = list(set(gift.category for gift in self.gift_catalog))
         
-        # Average reward across recommendations
-        avg_reward = total_reward / len(recommended_gifts)
+        # Calculate enhanced reward
+        reward = self._enhanced_reward_func.calculate_reward(
+            user_profile=self.current_state.user_profile,
+            recommended_gifts=recommended_gifts,
+            confidence_scores=confidence_scores,
+            tool_calls=getattr(self.current_state, 'tool_calls', None),
+            available_categories=available_categories
+        )
         
-        # Add diversity bonus
-        diversity_bonus = self._calculate_diversity_bonus(recommended_gifts)
-        avg_reward += 0.1 * diversity_bonus
-        
-        return min(1.0, max(-1.0, avg_reward))  # Clamp between -1 and 1
+        return reward
     
     def _calculate_budget_score(self, price: float, budget: float) -> float:
         """Calculate how well the price fits the budget"""

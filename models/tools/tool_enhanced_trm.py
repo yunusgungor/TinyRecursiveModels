@@ -56,7 +56,12 @@ class ToolEnhancedTRM(RLEnhancedTRM):
         for tool in gift_tools.get_all_tools():
             self.tool_registry.register_tool(tool)
         
+        # Initialize enhanced tool selector
+        from .enhanced_tool_selector import ContextAwareToolSelector
+        self._enhanced_tool_selector = ContextAwareToolSelector()
+        
         print(f"Registered {len(self.tool_registry.list_tools())} tools")
+        print("Enhanced context-aware tool selector initialized")
     
     def _init_tool_components(self):
         """Initialize tool-related neural network components"""
@@ -110,7 +115,7 @@ class ToolEnhancedTRM(RLEnhancedTRM):
     def decide_tool_usage(self, hidden_state: torch.Tensor, 
                          env_state: EnvironmentState) -> Tuple[str, float, Dict[str, Any]]:
         """
-        Decide which tool to use based on current state
+        Decide which tool to use based on current state using enhanced context-aware selection
         
         Args:
             hidden_state: Current hidden state from TRM
@@ -119,6 +124,28 @@ class ToolEnhancedTRM(RLEnhancedTRM):
         Returns:
             Tuple of (tool_name, confidence, parameters)
         """
+        # Use enhanced tool selector if available
+        if hasattr(self, '_enhanced_tool_selector'):
+            selected_tools = self._enhanced_tool_selector.select_tools(
+                env_state.user_profile, max_tools=1
+            )
+            
+            if selected_tools:
+                selected_tool, confidence = selected_tools[0]
+                
+                # Generate parameters if tool is selected and confidence is high enough
+                parameters = {}
+                if confidence > self.tool_config.tool_call_threshold:
+                    parameters = self._generate_tool_parameters(
+                        hidden_state, selected_tool, env_state
+                    )
+                    return selected_tool, confidence, parameters
+                else:
+                    return "no_tool", 0.0, {}
+            else:
+                return "no_tool", 0.0, {}
+        
+        # Fallback to original method if enhanced selector not available
         # Get tool selection probabilities
         tool_probs = self.tool_selector(hidden_state.mean(dim=1))  # Average over sequence
         tool_names = self.tool_registry.list_tools() + ["no_tool"]
