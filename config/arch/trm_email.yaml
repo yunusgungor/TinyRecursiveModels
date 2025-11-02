@@ -1,4 +1,4 @@
-# Configuration for TRM Email Classification Model
+# Enhanced Configuration for TRM Email Classification Model
 
 # Model architecture
 _target_: models.recursive_reasoning.trm_email.EmailTRM
@@ -8,6 +8,19 @@ num_email_categories: 10  # newsletter, work, personal, spam, promotional, socia
 use_category_embedding: true
 classification_dropout: 0.1
 
+# Email structure awareness
+use_email_structure: true  # Use email structure tokens (subject, body, etc.)
+email_structure_dim: 64  # Dimension for email structure embeddings
+
+# Attention mechanisms for emails
+use_hierarchical_attention: true  # Use hierarchical attention for email parts
+subject_attention_weight: 2.0  # Weight for subject attention
+sender_attention_weight: 1.5  # Weight for sender attention
+
+# Email-specific optimizations
+use_email_pooling: true  # Use email-aware pooling strategy
+pooling_strategy: "weighted"  # "mean", "max", "weighted", "attention"
+
 # Core TRM parameters optimized for email classification
 vocab_size: 5000  # Will be set dynamically based on dataset
 hidden_size: 512
@@ -15,14 +28,14 @@ num_heads: 8
 L_layers: 2  # Number of transformer/MLP layers
 expansion: 4  # MLP expansion factor
 
-# Recursive reasoning parameters
-H_cycles: 2  # High-level reasoning cycles (reduced for faster inference)
+# Recursive reasoning parameters (optimized for emails)
+H_cycles: 3  # Increased for better email understanding
 L_cycles: 4  # Low-level reasoning cycles
-halt_max_steps: 8  # Maximum halting steps
-halt_exploration_prob: 0.1  # Exploration probability during training
+halt_max_steps: 10  # Increased for complex emails
+halt_exploration_prob: 0.15  # Slightly higher exploration for email diversity
 
 # Position encoding
-pos_enc: "rope"  # rope, learned, or none
+pos_encodings: "rope"  # rope, learned, or none (note: different key name)
 
 # Model variant
 mlp_t: false  # Use transformer layers instead of MLP-only
@@ -38,16 +51,28 @@ forward_dtype: "bfloat16"  # Use bfloat16 for memory efficiency
 no_ACT_continue: true  # Simplified halting without continue loss
 
 # Puzzle embedding parameters (for email identifiers)
-puzzle_emb_lr: 1e-2  # Learning rate for puzzle embeddings
-puzzle_emb_weight_decay: 0.1  # Weight decay for puzzle embeddings
+puzzle_emb_ndim: 128  # Dimension for puzzle embeddings
+puzzle_emb_len: 16  # Length of puzzle embeddings
+num_puzzle_identifiers: 10000  # Maximum number of unique emails
 
 # Sequence length
-max_seq_len: 512  # Maximum email sequence length
+seq_len: 512  # Maximum email sequence length
+batch_size: 32  # Default batch size for config
 
 # Special token IDs (should match dataset preprocessing)
 pad_id: 0
 eos_id: 1
 unk_id: 2
+subject_id: 3
+body_id: 4
+from_id: 5
+to_id: 6
+
+# RMS norm parameters
+rms_norm_eps: 1e-5
+
+# RoPE parameters
+rope_theta: 10000.0
 
 # Email category mapping
 email_categories:
@@ -61,3 +86,8 @@ email_categories:
   travel: 7
   shopping: 8
   other: 9
+
+# Performance optimization flags
+use_flash_attention: false  # Enable if available
+gradient_checkpointing: false  # Enable for memory efficiency
+mixed_precision: true  # Use automatic mixed precision

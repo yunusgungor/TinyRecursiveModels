@@ -95,21 +95,43 @@ class EmailClassificationTrainer:
         """Load dataset information"""
         dataset_path = self.config.data_paths[0]
         
-        # Load vocabulary
-        vocab_path = os.path.join(dataset_path, "vocab.json")
-        with open(vocab_path, 'r') as f:
-            self.vocab = json.load(f)
+        # Try to load enhanced tokenizer first
+        tokenizer_path = os.path.join(dataset_path, "tokenizer.pkl")
+        if os.path.exists(tokenizer_path):
+            from models.email_tokenizer import EmailTokenizer
+            self.tokenizer = EmailTokenizer.load(tokenizer_path)
+            self.vocab = self.tokenizer.vocab
+            self.vocab_size = len(self.vocab)
+            
+            # Load tokenizer stats
+            stats_path = os.path.join(dataset_path, "tokenizer_stats.json")
+            if os.path.exists(stats_path):
+                with open(stats_path, 'r') as f:
+                    self.tokenizer_stats = json.load(f)
+            else:
+                self.tokenizer_stats = {}
+        else:
+            # Fallback to legacy vocabulary
+            vocab_path = os.path.join(dataset_path, "vocab.json")
+            with open(vocab_path, 'r') as f:
+                self.vocab = json.load(f)
+            self.vocab_size = len(self.vocab)
+            self.tokenizer = None
+            self.tokenizer_stats = {}
         
         # Load categories
         categories_path = os.path.join(dataset_path, "categories.json")
         with open(categories_path, 'r') as f:
             self.categories = json.load(f)
         
-        self.vocab_size = len(self.vocab)
         self.num_categories = len(self.categories)
         
         print(f"Loaded vocabulary: {self.vocab_size} tokens")
         print(f"Email categories: {list(self.categories.keys())}")
+        if self.tokenizer:
+            print(f"Using enhanced EmailTokenizer with {len(self.tokenizer_stats)} stats")
+        else:
+            print("Using legacy vocabulary")
     
     def setup_model(self):
         """Setup model"""

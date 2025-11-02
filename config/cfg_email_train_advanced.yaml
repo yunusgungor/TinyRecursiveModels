@@ -1,0 +1,222 @@
+# Advanced Email Classification Training Configuration
+
+defaults:
+  - arch: trm_email
+
+# Data configuration
+data_paths:
+  - "data/email-classification"
+
+# Training strategy
+training_strategy: "curriculum"  # "standard", "curriculum", "progressive", "multi_stage"
+
+# Training configuration
+training:
+  max_steps: 15000  # Increased for advanced training
+  batch_size: 32
+  eval_batch_size: 64
+  seed: 42
+  
+  # Gradient settings
+  grad_clip: 1.0
+  
+  # Logging and evaluation
+  log_interval: 50
+  eval_interval: 500
+  save_interval: 1000
+  
+  # Data loading
+  epochs_per_iter: 1
+
+# Optimizer configuration
+optimizer:
+  name: "adamw"
+  lr: 1e-4
+  beta1: 0.9
+  beta2: 0.95
+  eps: 1e-8
+  weight_decay: 0.1
+  
+  # Puzzle embedding specific
+  puzzle_emb_lr: 1e-2
+  puzzle_emb_weight_decay: 0.1
+
+# Advanced scheduler configuration
+scheduler:
+  name: "cosine_with_restarts"  # "cosine", "cosine_with_restarts", "polynomial", "linear"
+  warmup_steps: 1000
+  min_lr_ratio: 0.01
+
+# EMA configuration
+use_ema: true
+ema_decay: 0.999
+
+# Hyperparameter search configuration
+hyperparameter_search:
+  enabled: false  # Set to true to enable hyperparameter search
+  strategy: "random"  # "grid", "random", "bayesian"
+  num_trials: 20
+  
+  parameters:
+    # Model architecture parameters
+    hidden_size: [256, 512, 768]
+    num_heads: [4, 8, 12]
+    L_layers: [1, 2, 3]
+    H_cycles: [2, 3, 4]
+    L_cycles: [3, 4, 6]
+    
+    # Training parameters
+    learning_rate: [5e-5, 1e-4, 2e-4, 5e-4]
+    batch_size: [16, 32, 64]
+    weight_decay: [0.01, 0.1, 0.2]
+    
+    # Email-specific parameters
+    pooling_strategy: ["mean", "weighted", "attention"]
+    classification_dropout: [0.1, 0.2, 0.3]
+    subject_attention_weight: [1.5, 2.0, 2.5]
+    
+    # Scheduler parameters
+    warmup_steps: [500, 1000, 2000]
+
+# Performance monitoring
+performance_monitoring:
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_steps: 5000
+  
+  lr_reduction:
+    enabled: true
+    patience: 5
+    factor: 0.5
+    min_lr: 1e-6
+  
+  plateau_detection:
+    enabled: true
+    patience: 5
+
+# Logging configuration
+use_wandb: true
+wandb_project: "email-classification-trm-advanced"
+wandb_tags: ["email-classification", "trm", "advanced", "hyperparameter-tuning"]
+experiment_name: "trm_email_advanced_v1"
+
+# Output configuration
+output_dir: "outputs/email_classification_advanced"
+
+# Model architecture overrides (enhanced for advanced training)
+arch:
+  # Core model parameters (optimized for performance)
+  hidden_size: 512
+  num_heads: 8
+  L_layers: 2
+  expansion: 4
+  
+  # Enhanced recursive reasoning
+  H_cycles: 3  # Increased for better reasoning
+  L_cycles: 4
+  halt_max_steps: 12  # Increased for complex emails
+  halt_exploration_prob: 0.15
+  
+  # Email-specific enhancements
+  num_email_categories: 10
+  use_category_embedding: true
+  classification_dropout: 0.1
+  
+  # Email structure awareness (enhanced)
+  use_email_structure: true
+  email_structure_dim: 64
+  use_hierarchical_attention: true
+  subject_attention_weight: 2.0
+  sender_attention_weight: 1.5
+  use_email_pooling: true
+  pooling_strategy: "weighted"
+  
+  # Position encoding
+  pos_encodings: "rope"
+  
+  # Model variant
+  mlp_t: false
+  
+  # Embedding
+  embed_scale: true
+  init_std: 1.0
+  
+  # Training dtype
+  forward_dtype: "bfloat16"
+  
+  # ACT parameters
+  no_ACT_continue: true
+  
+  # Puzzle embedding parameters
+  puzzle_emb_ndim: 128
+  puzzle_emb_len: 16
+  num_puzzle_identifiers: 10000
+  
+  # Sequence parameters
+  seq_len: 512
+  batch_size: 32
+  
+  # Special token IDs
+  pad_id: 0
+  eos_id: 1
+  unk_id: 2
+  subject_id: 3
+  body_id: 4
+  from_id: 5
+  to_id: 6
+  
+  # RMS norm parameters
+  rms_norm_eps: 1e-5
+  rope_theta: 10000.0
+
+# Advanced training features
+advanced_features:
+  # Gradient accumulation
+  gradient_accumulation_steps: 1
+  
+  # Mixed precision training
+  use_amp: true
+  amp_opt_level: "O1"
+  
+  # Model compilation (PyTorch 2.0+)
+  compile_model: false
+  
+  # Gradient checkpointing for memory efficiency
+  gradient_checkpointing: false
+  
+  # Model ensembling
+  ensemble:
+    enabled: false
+    num_models: 3
+    voting_strategy: "soft"  # "hard", "soft", "weighted"
+  
+  # Knowledge distillation
+  distillation:
+    enabled: false
+    teacher_model_path: null
+    temperature: 4.0
+    alpha: 0.7
+  
+  # Data augmentation during training
+  online_augmentation:
+    enabled: true
+    augmentation_prob: 0.1
+    techniques: ["synonym_replacement", "random_insertion", "random_deletion"]
+
+# Distributed training configuration
+distributed:
+  backend: "nccl"
+  init_method: "env://"
+  
+# Resource optimization
+resource_optimization:
+  # Memory optimization
+  max_memory_usage: 0.9  # 90% of available GPU memory
+  
+  # CPU optimization
+  num_workers: 4
+  pin_memory: true
+  
+  # Disk I/O optimization
+  prefetch_factor: 2

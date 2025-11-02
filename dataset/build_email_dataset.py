@@ -25,6 +25,8 @@ class EmailDataProcessConfig(BaseModel):
     min_emails_per_category: int = 10  # Minimum emails per category
     test_split_ratio: float = 0.2  # Ratio for test split
     puzzle_identifiers_start: int = 1
+    vocab_size: int = 5000  # Vocabulary size for enhanced tokenizer
+    use_enhanced_tokenizer: bool = True  # Use enhanced EmailTokenizer
 
 
 # Email categories for classification
@@ -89,8 +91,34 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
+def tokenize_email_with_enhanced_tokenizer(email: EmailExample, tokenizer, max_seq_len: int) -> Tuple[np.ndarray, int, Dict]:
+    """Tokenize email using enhanced EmailTokenizer"""
+    
+    # Convert EmailExample to dictionary format
+    email_dict = {
+        'id': email.id,
+        'subject': email.subject,
+        'body': email.body,
+        'sender': email.sender,
+        'recipient': email.recipient,
+        'category': email.category
+    }
+    
+    # Use enhanced tokenizer
+    token_ids, metadata = tokenizer.encode_email(email_dict)
+    
+    # Pad to max_seq_len
+    padded_sequence = np.full(max_seq_len, tokenizer.SPECIAL_TOKENS["<PAD>"], dtype=np.int32)
+    padded_sequence[:len(token_ids)] = token_ids
+    
+    # Get category label
+    category_id = EMAIL_CATEGORIES.get(email.category.lower(), EMAIL_CATEGORIES["other"])
+    
+    return padded_sequence, category_id, metadata
+
+
 def tokenize_email(email: EmailExample, vocab: Dict[str, int], max_seq_len: int) -> Tuple[np.ndarray, int]:
-    """Tokenize email into sequence of token IDs"""
+    """Legacy tokenize email function (kept for compatibility)"""
     
     # Build email sequence with special tokens
     sequence = []
@@ -133,8 +161,33 @@ def tokenize_email(email: EmailExample, vocab: Dict[str, int], max_seq_len: int)
     return padded_sequence, category_id
 
 
+def build_vocabulary_enhanced(emails: List[EmailExample], vocab_size: int = 5000, min_freq: int = 2) -> 'EmailTokenizer':
+    """Build enhanced vocabulary using EmailTokenizer"""
+    
+    from models.email_tokenizer import EmailTokenizer
+    
+    # Convert EmailExample objects to dictionaries
+    email_dicts = []
+    for email in emails:
+        email_dict = {
+            'id': email.id,
+            'subject': email.subject,
+            'body': email.body,
+            'sender': email.sender,
+            'recipient': email.recipient,
+            'category': email.category
+        }
+        email_dicts.append(email_dict)
+    
+    # Create and train enhanced tokenizer
+    tokenizer = EmailTokenizer(vocab_size=vocab_size, max_seq_len=512)
+    tokenizer.build_vocabulary(email_dicts, min_freq=min_freq)
+    
+    return tokenizer
+
+
 def build_vocabulary(emails: List[EmailExample], min_freq: int = 2) -> Dict[str, int]:
-    """Build vocabulary from email texts"""
+    """Legacy build vocabulary function (kept for compatibility)"""
     
     # Count all tokens
     token_counts = Counter()
@@ -296,8 +349,135 @@ def create_sample_email_data(output_file: str):
     print(f"Created sample email data with {len(extended_samples)} emails at {output_file}")
 
 
+def convert_email_dataset_enhanced(config: EmailDataProcessConfig):
+    """Convert email data to TRM-compatible format using enhanced tokenizer"""
+    
+    np.random.seed(config.seed)
+    
+    # Load emails
+    emails = load_email_data(config)
+    
+    # Filter categories with minimum examples
+    category_counts = Counter(email.category.lower() for email in emails)
+    valid_categories = {cat for cat, count in category_counts.items() if count >= config.min_emails_per_category}
+    emails = [email for email in emails if email.category.lower() in valid_categories]
+    
+    print(f"Filtered to {len(emails)} emails with valid categories: {valid_categories}")
+    
+    # Build enhanced vocabulary
+    tokenizer = build_vocabulary_enhanced(emails, vocab_size=config.vocab_size, min_freq=2)
+    
+    # Split into train/test
+    np.random.shuffle(emails)
+    split_idx = int(len(emails) * (1 - config.test_split_ratio))
+    train_emails = emails[:split_idx]
+    test_emails = emails[split_idx:]
+    
+    print(f"Split: {len(train_emails)} train, {len(test_emails)} test")
+    
+    # Process each split
+    for split_name, split_emails in [("train", train_emails), ("test", test_emails)]:
+        
+        # Create augmented dataset for training
+        if split_name == "train":
+            augmented_emails = []
+            for email in split_emails:
+                augmented_emails.append(email)  # Original
+                for aug_id in range(config.num_aug):
+                    augmented_emails.append(augment_email(email, aug_id))
+            split_emails = augmented_emails
+        
+        print(f"Processing {split_name} split with {len(split_emails)} emails")
+        
+        # Convert to sequences using enhanced tokenizer
+        inputs = []
+        labels = []
+        puzzle_identifiers = []
+        metadata_list = []
+        
+        for i, email in enumerate(split_emails):
+            input_seq, label, metadata = tokenize_email_with_enhanced_tokenizer(email, tokenizer, config.max_seq_len)
+            inputs.append(input_seq)
+            labels.append(label)
+            puzzle_identifiers.append(config.puzzle_identifiers_start + i)
+            metadata_list.append(metadata)
+        
+        # Create indices (each email is its own puzzle and group)
+        puzzle_indices = np.arange(len(inputs) + 1, dtype=np.int32)
+        group_indices = np.arange(len(inputs) + 1, dtype=np.int32)
+        
+        # Save data
+        split_dir = os.path.join(config.output_dir, split_name)
+        os.makedirs(split_dir, exist_ok=True)
+        
+        np.save(os.path.join(split_dir, "all__inputs.npy"), np.array(inputs))
+        np.save(os.path.join(split_dir, "all__labels.npy"), np.array(labels, dtype=np.int32))
+        np.save(os.path.join(split_dir, "all__puzzle_identifiers.npy"), np.array(puzzle_identifiers, dtype=np.int32))
+        np.save(os.path.join(split_dir, "all__puzzle_indices.npy"), puzzle_indices)
+        np.save(os.path.join(split_dir, "all__group_indices.npy"), group_indices)
+        
+        # Save metadata
+        with open(os.path.join(split_dir, "email_metadata.json"), "w") as f:
+            json.dump(metadata_list, f, indent=2)
+        
+        # Create dataset metadata
+        dataset_metadata = PuzzleDatasetMetadata(
+            seq_len=config.max_seq_len,
+            vocab_size=len(tokenizer.vocab),
+            pad_id=tokenizer.SPECIAL_TOKENS["<PAD>"],
+            ignore_label_id=None,
+            blank_identifier_id=0,
+            num_puzzle_identifiers=len(inputs) + config.puzzle_identifiers_start,
+            total_groups=len(inputs),
+            mean_puzzle_examples=1.0,
+            total_puzzles=len(inputs),
+            sets=["all"]
+        )
+        
+        with open(os.path.join(split_dir, "dataset.json"), "w") as f:
+            json.dump(dataset_metadata.model_dump(), f, indent=2)
+    
+    # Save enhanced tokenizer
+    tokenizer_path = os.path.join(config.output_dir, "tokenizer.pkl")
+    tokenizer.save(tokenizer_path)
+    
+    # Save vocabulary and category mappings (for compatibility)
+    with open(os.path.join(config.output_dir, "vocab.json"), "w") as f:
+        json.dump(tokenizer.vocab, f, indent=2)
+    
+    with open(os.path.join(config.output_dir, "categories.json"), "w") as f:
+        json.dump(EMAIL_CATEGORIES, f, indent=2)
+    
+    # Save identifiers mapping
+    with open(os.path.join(config.output_dir, "identifiers.json"), "w") as f:
+        identifiers = ["<blank>"] + [f"email_{i}" for i in range(len(emails))]
+        json.dump(identifiers, f, indent=2)
+    
+    # Save tokenizer statistics
+    stats = tokenizer.get_vocabulary_stats()
+    with open(os.path.join(config.output_dir, "tokenizer_stats.json"), "w") as f:
+        json.dump(stats, f, indent=2)
+    
+    print(f"Enhanced email classification dataset created at {config.output_dir}")
+    print(f"Vocabulary size: {len(tokenizer.vocab)}")
+    print(f"Categories: {list(EMAIL_CATEGORIES.keys())}")
+    print(f"Tokenizer saved at: {tokenizer_path}")
+
+
 def convert_email_dataset(config: EmailDataProcessConfig):
-    """Convert email data to TRM-compatible format"""
+    """Convert email data to TRM-compatible format (enhanced version by default)"""
+    
+    # Use enhanced version by default
+    if hasattr(config, 'use_enhanced_tokenizer') and not config.use_enhanced_tokenizer:
+        # Legacy version
+        convert_email_dataset_legacy(config)
+    else:
+        # Enhanced version
+        convert_email_dataset_enhanced(config)
+
+
+def convert_email_dataset_legacy(config: EmailDataProcessConfig):
+    """Legacy convert email dataset function"""
     
     np.random.seed(config.seed)
     
