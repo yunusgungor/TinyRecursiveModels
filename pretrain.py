@@ -17,7 +17,13 @@ import coolname
 import hydra
 import pydantic
 from omegaconf import DictConfig
-from adam_atan2 import AdamATan2
+
+# Try to import AdamATan2, fallback to AdamW if not available
+try:
+    from adam_atan2 import AdamATan2
+except ImportError:
+    print("Warning: adam_atan2 not available, using torch.optim.AdamW as fallback")
+    AdamATan2 = torch.optim.AdamW
 
 from puzzle_dataset import PuzzleDataset, PuzzleDatasetConfig, PuzzleDatasetMetadata
 from utils.functions import load_model_class, get_model_source_path

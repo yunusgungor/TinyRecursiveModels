@@ -1,0 +1,136 @@
+# MacBook 8GB RAM - Small Dataset Configuration
+# Optimized for datasets < 100MB on MacBooks with 8GB RAM
+
+defaults:
+  - arch: trm
+  - _self_
+
+# MacBook hardware profile
+hardware_profile: "macbook_8gb"
+expected_ram_gb: 8
+expected_cpu_cores: 4
+
+# Data configuration
+data_paths: ['data/small-dataset']
+data_paths_test: []
+
+# Memory-constrained training parameters
+global_batch_size: 32  # Small batch size for memory constraints
+effective_batch_size: 128  # Achieved through gradient accumulation
+
+# Training configuration optimized for 8GB RAM
+epochs: 1000  # Required field at top level
+training:
+  eval_interval: 100
+  checkpoint_every_eval: true
+  
+  # Memory management
+  memory_limit_mb: 4000  # Conservative limit for 8GB system
+  gradient_accumulation_steps: 4  # To achieve effective batch size
+  max_sequence_length: 256  # Reduced for memory efficiency
+  
+  # CPU optimization
+  num_workers: 2  # Conservative for 4-core CPU
+  pin_memory: false  # Disabled to save memory
+  enable_cpu_optimization: true
+  torch_threads: 4
+  
+  # Checkpoint management
+  checkpoint_interval: 200
+  max_checkpoints_to_keep: 2  # Minimal to save disk space
+  
+  # Progress monitoring
+  monitoring_interval: 5.0  # Less frequent to reduce overhead
+  enable_thermal_monitoring: true
+
+# Learning rate optimized for small batch sizes
+lr: 2e-4  # Slightly higher for smaller effective batch size
+lr_min_ratio: 0.1
+lr_warmup_steps: 100  # Reduced warmup
+
+# Regularization
+beta1: 0.9
+beta2: 0.95
+weight_decay: 0.05  # Reduced for smaller model
+puzzle_emb_weight_decay: 0.05
+
+# Puzzle embedding training
+puzzle_emb_lr: 5e-3  # Reduced for stability
+
+# Model architecture adjustments for memory constraints
+arch:
+  # Required fields
+  name: "trm"
+  loss:
+    name: "cross_entropy"
+  
+  # Reduced model size for 8GB RAM
+  hidden_size: 256
+  num_heads: 8
+  L_layers: 2
+  expansion: 2  # Reduced expansion factor
+  
+  # Conservative recursive reasoning
+  H_cycles: 2
+  L_cycles: 2
+  halt_max_steps: 4
+  halt_exploration_prob: 0.1
+  
+  # Memory-efficient settings
+  forward_dtype: "float32"  # More stable on CPU
+  embed_scale: true
+  init_std: 0.8
+  
+  # Sequence parameters
+  seq_len: 256
+  batch_size: 8  # Physical batch size
+  
+  # RMS norm parameters
+  rms_norm_eps: 1e-5
+
+# Evaluators
+evaluators:
+  - name: arc@ARC
+
+# System settings
+seed: 42
+min_eval_interval: 0
+ema: false  # Disabled to save memory
+freeze_weights: false
+
+# Logging (minimal for performance)
+use_wandb: false  # Disabled by default for local training
+log_interval: 50
+
+# Output configuration
+output_dir: "outputs/macbook_8gb_small"
+experiment_name: "trm_small_8gb"
+
+# MacBook-specific optimizations
+macbook_optimizations:
+  # Memory management
+  enable_memory_monitoring: true
+  memory_pressure_threshold: 75.0
+  dynamic_batch_sizing: true
+  auto_garbage_collection: true
+  
+  # CPU optimization
+  use_mkl: true
+  optimize_tensor_operations: true
+  enable_vectorization: true
+  
+  # Dataset management
+  streaming_threshold_mb: 50.0
+  cache_threshold_mb: 25.0
+  chunk_size_mb: 10.0
+  enable_caching: true
+  auto_fallback_streaming: true
+  
+  # Thermal management
+  thermal_throttle_threshold: 85.0
+  cooling_delay_seconds: 2.0
+  
+  # Progress reporting
+  show_resource_usage: true
+  show_eta: true
+  show_samples_per_second: true

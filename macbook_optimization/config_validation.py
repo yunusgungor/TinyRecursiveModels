@@ -362,21 +362,29 @@ class ConfigurationValidator:
         
         # Validate learning rate
         lr = config.get('lr', 1e-4)
+        # Ensure lr is a float (might come as string from YAML)
+        if isinstance(lr, str):
+            try:
+                lr = float(lr)
+            except ValueError:
+                lr = 1e-4  # Default fallback
+        
         batch_size = config.get('global_batch_size', config.get('batch_size', 8))
         effective_batch = batch_size * grad_accum
         
         # Check if learning rate is scaled appropriately for batch size
-        expected_lr = 1e-4 * math.sqrt(effective_batch / 64)
-        if abs(lr - expected_lr) / expected_lr > 0.5:  # More than 50% difference
-            issues.append(ValidationIssue(
-                level=ValidationLevel.INFO,
-                category="training",
-                message=f"Learning rate may not be optimally scaled for batch size",
-                current_value=lr,
-                suggested_value=expected_lr,
-                auto_correctable=False,
-                impact="Suboptimal convergence"
-            ))
+        if effective_batch > 0:  # Avoid math domain error
+            expected_lr = 1e-4 * math.sqrt(effective_batch / 64)
+            if abs(lr - expected_lr) / expected_lr > 0.5:  # More than 50% difference
+                issues.append(ValidationIssue(
+                    level=ValidationLevel.INFO,
+                    category="training",
+                    message=f"Learning rate may not be optimally scaled for batch size",
+                    current_value=lr,
+                    suggested_value=expected_lr,
+                    auto_correctable=False,
+                    impact="Suboptimal convergence"
+                ))
         
         return issues
     

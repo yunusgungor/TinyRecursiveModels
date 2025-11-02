@@ -1,0 +1,140 @@
+# MacBook 16GB RAM - Large Dataset Configuration
+# Optimized for datasets > 1GB on MacBooks with 16GB RAM
+
+defaults:
+  - arch: trm
+  - _self_
+
+# MacBook hardware profile
+hardware_profile: "macbook_16gb"
+expected_ram_gb: 16
+expected_cpu_cores: 8
+
+# Data configuration
+data_paths: ['data/large-dataset']
+data_paths_test: []
+
+# Training parameters for 16GB RAM + large dataset
+global_batch_size: 32  # Smaller batch for large datasets
+effective_batch_size: 128
+
+# Training configuration for large datasets
+epochs: 5000  # Required field at top level
+training:
+  eval_interval: 500
+  checkpoint_every_eval: true
+  
+  # Conservative memory management for large datasets
+  memory_limit_mb: 6000
+  gradient_accumulation_steps: 4
+  max_sequence_length: 384  # Reduced for memory efficiency
+  
+  # CPU optimization
+  num_workers: 2  # Reduced for memory constraints
+  pin_memory: false  # Disabled to save memory
+  enable_cpu_optimization: true
+  torch_threads: 8
+  
+  # Checkpoint management
+  checkpoint_interval: 800
+  max_checkpoints_to_keep: 2  # Fewer checkpoints for disk space
+  
+  # Progress monitoring
+  monitoring_interval: 5.0
+  enable_thermal_monitoring: true
+
+# Learning rate for large datasets
+lr: 6e-5  # Lower learning rate for stability
+lr_min_ratio: 0.05
+lr_warmup_steps: 1000
+
+# Regularization
+beta1: 0.9
+beta2: 0.95
+weight_decay: 0.12  # Slightly higher for large datasets
+puzzle_emb_weight_decay: 0.12
+
+# Puzzle embedding training
+puzzle_emb_lr: 6e-3
+
+# Model architecture optimized for large datasets
+arch:
+  # Required fields
+  name: "trm"
+  loss:
+    name: "cross_entropy"
+  
+  # Moderate model size for memory efficiency
+  hidden_size: 320
+  num_heads: 10
+  L_layers: 2  # Reduced layers for memory
+  expansion: 3  # Reduced expansion
+  
+  # Conservative recursive reasoning
+  H_cycles: 2
+  L_cycles: 3
+  halt_max_steps: 8
+  halt_exploration_prob: 0.1
+  
+  # Training settings
+  forward_dtype: "float32"
+  embed_scale: true
+  init_std: 0.9
+  
+  # Sequence parameters
+  seq_len: 384
+  batch_size: 8  # Small physical batch size
+  
+  # RMS norm parameters
+  rms_norm_eps: 1e-5
+
+# Evaluators
+evaluators:
+  - name: arc@ARC
+
+# System settings
+seed: 42
+min_eval_interval: 0
+ema: false  # Disabled to save memory
+freeze_weights: false
+
+# Logging
+use_wandb: true
+wandb_project: "macbook-trm-16gb"
+log_interval: 200
+
+# Output configuration
+output_dir: "outputs/macbook_16gb_large"
+experiment_name: "trm_large_16gb"
+
+# MacBook-specific optimizations for large datasets
+macbook_optimizations:
+  # Aggressive memory management
+  enable_memory_monitoring: true
+  memory_pressure_threshold: 70.0
+  dynamic_batch_sizing: true
+  auto_garbage_collection: true
+  force_gc_interval: 25  # More frequent GC
+  
+  # CPU optimization
+  use_mkl: true
+  optimize_tensor_operations: true
+  enable_vectorization: true
+  
+  # Dataset management - streaming required
+  streaming_threshold_mb: 800.0
+  cache_threshold_mb: 400.0
+  chunk_size_mb: 200.0
+  enable_caching: false  # Disabled for large datasets
+  auto_fallback_streaming: true
+  force_streaming_mode: true  # Force streaming for large datasets
+  
+  # Thermal management
+  thermal_throttle_threshold: 80.0
+  cooling_delay_seconds: 2.0
+  
+  # Progress reporting
+  show_resource_usage: true
+  show_eta: true
+  show_samples_per_second: true
+  memory_warning_threshold: 65.0

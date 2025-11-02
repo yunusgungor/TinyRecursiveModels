@@ -29,7 +29,13 @@ import coolname
 import hydra
 import pydantic
 from omegaconf import DictConfig
-from adam_atan2 import AdamATan2
+
+# Try to import AdamATan2, fallback to AdamW if not available
+try:
+    from adam_atan2 import AdamATan2
+except ImportError:
+    print("Warning: adam_atan2 not available, using torch.optim.AdamW as fallback")
+    AdamATan2 = torch.optim.AdamW
 
 # Import original training components
 from puzzle_dataset import PuzzleDataset, PuzzleDatasetConfig, PuzzleDatasetMetadata
@@ -46,6 +52,9 @@ from macbook_optimization.training_config_adapter import TrainingConfigAdapter, 
 from macbook_optimization.config_validation import ConfigurationValidator
 from macbook_optimization.dataset_management import (
     DatasetManager, DatasetManagementConfig, create_memory_efficient_dataloader
+)
+from macbook_optimization.checkpoint_management import (
+    CheckpointManager, CheckpointConfig, CheckpointMetadata
 )
 
 # Import original config classes
@@ -67,6 +76,7 @@ class MacBookTrainingState:
     memory_manager: MemoryManager
     cpu_optimizer: CPUOptimizer
     resource_monitor: ResourceMonitor
+    checkpoint_manager: CheckpointManager
     
     # Configuration and validation
     config_adapter: TrainingConfigAdapter
@@ -118,6 +128,21 @@ class MacBookTRMTrainer:
             auto_fallback_streaming=True
         )
         self.dataset_manager = DatasetManager(dataset_config, self.memory_manager)
+        
+        # Initialize checkpoint management
+        checkpoint_config = CheckpointConfig(
+            checkpoint_dir=config.checkpoint_path or "checkpoints",
+            max_checkpoints=3,
+            save_interval_steps=500,
+            save_interval_minutes=30.0,
+            memory_aware_intervals=True,
+            memory_threshold_for_saving=70.0,
+            auto_cleanup=True,
+            validate_on_load=True
+        )
+        self.checkpoint_manager = CheckpointManager(
+            checkpoint_config, self.memory_manager
+        )
         
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -404,6 +429,7 @@ class MacBookTRMTrainer:
             memory_manager=self.memory_manager,
             cpu_optimizer=self.cpu_optimizer,
             resource_monitor=self.resource_monitor,
+            checkpoint_manager=self.checkpoint_manager,
             config_adapter=self.config_adapter,
             validator=self.validator,
             original_config=self.base_config.model_dump(),
@@ -527,29 +553,155 @@ class MacBookTRMTrainer:
         
         return None
     
-    def should_checkpoint(self, macbook_state: MacBookTrainingState, 
-                         training_params) -> bool:
+    def save_checkpoint_macbook(self, macbook_state: MacBookTrainingState, 
+                               training_params, force: bool = False) -> bool:
         """
-        Determine if checkpointing should occur.
+        Save checkpoint using MacBook checkpoint management system.
         
         Args:
             macbook_state: MacBook training state
             training_params: Training parameters
+            force: Force saving regardless of conditions
             
         Returns:
-            True if should checkpoint
+            True if checkpoint was saved successfully
         """
-        current_time = time.time()
-        time_since_last = current_time - macbook_state.last_checkpoint_time
+        train_state = macbook_state.train_state
         
-        # Checkpoint based on steps or time
-        step_interval = training_params.checkpoint_interval
-        time_interval = 300  # 5 minutes
+        # Get current learning rate
+        current_lr = 0.0
+        if train_state.optimizers and len(train_state.optimizers[0].param_groups) > 0:
+            current_lr = train_state.optimizers[0].param_groups[0]['lr']
         
-        should_checkpoint_step = macbook_state.train_state.step % step_interval == 0
-        should_checkpoint_time = time_since_last > time_interval
+        # Get current loss
+        current_loss = (macbook_state.training_metrics['loss'][-1] 
+                       if macbook_state.training_metrics['loss'] else 0.0)
         
-        return should_checkpoint_step or should_checkpoint_time
+        # Calculate current epoch
+        current_epoch = int(train_state.step * training_params.effective_batch_size / 
+                           macbook_state.samples_processed) if macbook_state.samples_processed > 0 else 0
+        
+        # Prepare model and optimizer states
+        model_state = train_state.model.state_dict()
+        optimizer_states = [opt.state_dict() for opt in train_state.optimizers]
+        
+        # Create training configuration for checkpoint
+        from macbook_optimization.config_management import MacBookTrainingConfig
+        training_config = MacBookTrainingConfig(
+            batch_size=training_params.batch_size,
+            gradient_accumulation_steps=training_params.gradient_accumulation_steps,
+            num_workers=training_params.num_workers,
+            pin_memory=training_params.pin_memory,
+            memory_limit_mb=training_params.memory_limit_mb,
+            enable_memory_monitoring=True,
+            dynamic_batch_sizing=True,
+            memory_pressure_threshold=75.0,
+            use_mkl=True,
+            torch_threads=4,
+            enable_cpu_optimization=True,
+            learning_rate=training_params.learning_rate,
+            weight_decay=0.01,
+            warmup_steps=100,
+            max_steps=train_state.total_steps,
+            checkpoint_interval=training_params.checkpoint_interval,
+            max_checkpoints_to_keep=3,
+            monitoring_interval=2.0,
+            enable_thermal_monitoring=True,
+            hardware_summary=macbook_state.hardware_detector.get_hardware_summary()
+        )
+        
+        # Save checkpoint
+        result = macbook_state.checkpoint_manager.save_checkpoint(
+            model_state=model_state,
+            optimizer_state={'optimizers': optimizer_states, 'carry': train_state.carry},
+            step=train_state.step,
+            epoch=current_epoch,
+            loss=current_loss,
+            learning_rate=current_lr,
+            training_config=training_config,
+            training_time_seconds=macbook_state.total_training_time,
+            force=force
+        )
+        
+        if result.success:
+            macbook_state.last_checkpoint_time = time.time()
+            print(f"Checkpoint saved: {result.checkpoint_id} "
+                  f"(size: {result.disk_usage_mb:.1f}MB, "
+                  f"time: {result.save_time_seconds:.2f}s)")
+            
+            if result.warnings:
+                for warning in result.warnings:
+                    print(f"  Warning: {warning}")
+        else:
+            print(f"Checkpoint save failed: {', '.join(result.errors)}")
+            if result.warnings:
+                for warning in result.warnings:
+                    print(f"  Warning: {warning}")
+        
+        return result.success
+    
+    def load_checkpoint_macbook(self, checkpoint_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Load checkpoint using MacBook checkpoint management system.
+        
+        Args:
+            checkpoint_id: Specific checkpoint ID to load (latest if None)
+            
+        Returns:
+            Loaded checkpoint data or None if failed
+        """
+        # Create current config for validation
+        from macbook_optimization.config_management import MacBookTrainingConfig
+        current_config = MacBookTrainingConfig(
+            batch_size=8,  # Default values for validation
+            gradient_accumulation_steps=8,
+            num_workers=2,
+            pin_memory=False,
+            memory_limit_mb=4000,
+            enable_memory_monitoring=True,
+            dynamic_batch_sizing=True,
+            memory_pressure_threshold=75.0,
+            use_mkl=True,
+            torch_threads=4,
+            enable_cpu_optimization=True,
+            learning_rate=1e-4,
+            weight_decay=0.01,
+            warmup_steps=100,
+            max_steps=10000,
+            checkpoint_interval=500,
+            max_checkpoints_to_keep=3,
+            monitoring_interval=2.0,
+            enable_thermal_monitoring=True,
+            hardware_summary={}
+        )
+        
+        result = self.checkpoint_manager.load_checkpoint(
+            checkpoint_id=checkpoint_id,
+            validate_config=True,
+            current_config=current_config
+        )
+        
+        if result.success:
+            print(f"Checkpoint loaded: {result.checkpoint_id}")
+            if result.metadata:
+                print(f"  Step: {result.metadata.step}, Loss: {result.metadata.loss:.4f}")
+                print(f"  Training time: {result.metadata.training_time_seconds/60:.1f} minutes")
+            
+            if result.warnings:
+                for warning in result.warnings:
+                    print(f"  Warning: {warning}")
+            
+            if not result.config_compatible:
+                print("  Configuration mismatch detected - proceeding with compatibility mode")
+            
+            return {
+                'model_state_dict': result.model_state,
+                'optimizer_state': result.optimizer_state,
+                'metadata': result.metadata
+            }
+        else:
+            print(f"Checkpoint load failed: {', '.join(result.errors)}")
+            return None
     
     def create_progress_display(self, macbook_state: MacBookTrainingState) -> str:
         """
@@ -658,6 +810,34 @@ class MacBookTRMTrainer:
         # Initialize training state
         macbook_state = self.initialize_training_state(config_result, train_metadata)
         
+        # Check for checkpoint resumption
+        if self.base_config.load_checkpoint:
+            print("Checking for existing checkpoints to resume...")
+            checkpoint_data = self.load_checkpoint_macbook()
+            if checkpoint_data and checkpoint_data['model_state_dict']:
+                print("Resuming from checkpoint...")
+                
+                # Load model state
+                macbook_state.train_state.model.load_state_dict(checkpoint_data['model_state_dict'])
+                
+                # Load optimizer states if available
+                if checkpoint_data['optimizer_state'] and 'optimizers' in checkpoint_data['optimizer_state']:
+                    optimizer_states = checkpoint_data['optimizer_state']['optimizers']
+                    for i, (optimizer, state) in enumerate(zip(macbook_state.train_state.optimizers, optimizer_states)):
+                        if i < len(optimizer_states):
+                            optimizer.load_state_dict(state)
+                
+                # Restore carry state if available
+                if checkpoint_data['optimizer_state'] and 'carry' in checkpoint_data['optimizer_state']:
+                    macbook_state.train_state.carry = checkpoint_data['optimizer_state']['carry']
+                
+                # Update step counter if metadata is available
+                if checkpoint_data['metadata']:
+                    macbook_state.train_state.step = checkpoint_data['metadata'].step
+                    print(f"Resumed from step {macbook_state.train_state.step}")
+            else:
+                print("No valid checkpoint found for resumption")
+        
         # Setup progress tracking
         progress_bar = tqdm.tqdm(total=macbook_state.train_state.total_steps)
         
@@ -734,11 +914,13 @@ class MacBookTRMTrainer:
                     if ema_helper:
                         ema_helper.update(macbook_state.train_state.model)
                     
-                    # Checkpoint if needed
-                    if self.should_checkpoint(macbook_state, config_result.training_params):
-                        print("\nSaving checkpoint...")
-                        save_train_state(self.base_config, macbook_state.train_state)
-                        macbook_state.last_checkpoint_time = time.time()
+                    # Checkpoint if needed using MacBook checkpoint management
+                    should_save, reason = macbook_state.checkpoint_manager.should_save_checkpoint(
+                        macbook_state.train_state.step
+                    )
+                    if should_save:
+                        print(f"\nSaving checkpoint (reason: {reason})...")
+                        self.save_checkpoint_macbook(macbook_state, config_result.training_params)
                 
                 # Evaluation phase
                 if iter_id >= self.base_config.min_eval_interval and eval_loader:
@@ -760,10 +942,10 @@ class MacBookTRMTrainer:
                     if eval_metrics and self.base_config.project_name:
                         wandb.log(eval_metrics, step=macbook_state.train_state.step)
                     
-                    # Final checkpoint
+                    # Final checkpoint using MacBook checkpoint management
                     if iter_id == total_iters - 1 or self.base_config.checkpoint_every_eval:
                         print("Saving final checkpoint...")
-                        save_train_state(self.base_config, eval_state)
+                        self.save_checkpoint_macbook(macbook_state, config_result.training_params, force=True)
         
         except KeyboardInterrupt:
             print("\nTraining interrupted by user")
@@ -809,6 +991,14 @@ class MacBookTRMTrainer:
                 print(f"  Dataset {i+1}: {metrics.total_size_mb:.1f}MB, "
                       f"strategy: {metrics.loading_strategy}, "
                       f"memory usage: {metrics.memory_usage_mb:.1f}MB")
+        
+        print(f"\nCheckpoint Management:")
+        checkpoint_summary = macbook_state.checkpoint_manager.get_checkpoint_summary()
+        print(f"  Checkpoints saved: {checkpoint_summary['checkpoint_count']}")
+        print(f"  Total checkpoint size: {checkpoint_summary['total_size_mb']:.1f}MB")
+        print(f"  Free disk space: {checkpoint_summary['free_disk_space_mb']:.1f}MB")
+        if checkpoint_summary['latest_checkpoint']:
+            print(f"  Latest checkpoint: {checkpoint_summary['latest_checkpoint']}")
         
         if macbook_state.training_metrics['loss']:
             final_loss = macbook_state.training_metrics['loss'][-1]
