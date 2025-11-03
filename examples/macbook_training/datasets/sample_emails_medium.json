@@ -1,0 +1,152 @@
+[
+  {
+    "id": "email_001",
+    "subject": "Weekly Tech Newsletter - AI Advances",
+    "body": "This week's newsletter covers the latest advances in artificial intelligence, machine learning breakthroughs, and emerging technology trends. Our team has compiled the most important developments from leading research institutions and tech companies worldwide. Featured topics include: GPT-4 improvements, computer vision applications in healthcare, autonomous vehicle progress, and quantum computing milestones. Don't miss our exclusive interview with Dr. Sarah Chen about the future of neural networks.",
+    "sender": "newsletter@techweekly.com",
+    "recipient": "subscriber@example.com",
+    "category": "Newsletter",
+    "language": "en",
+    "timestamp": "2024-01-15T09:00:00Z"
+  },
+  {
+    "id": "email_002",
+    "subject": "Haftalık Teknoloji Bülteni - Yapay Zeka Gelişmeleri",
+    "body": "Bu haftanın bülteninde yapay zeka alanındaki son gelişmeler, makine öğrenmesi atılımları ve yeni teknoloji trendleri yer alıyor. Ekibimiz, önde gelen araştırma kurumları ve teknoloji şirketlerinden en önemli gelişmeleri derledi. Öne çıkan konular: GPT-4 iyileştirmeleri, sağlık alanında bilgisayarlı görü uygulamaları, otonom araç ilerlemeleri ve kuantum bilişim kilometre taşları.",
+    "sender": "bulten@teknolojihaber.com",
+    "recipient": "abone@example.com",
+    "category": "Newsletter",
+    "language": "tr",
+    "timestamp": "2024-01-15T09:30:00Z"
+  },
+  {
+    "id": "email_003",
+    "subject": "Project Meeting Tomorrow - Conference Room B",
+    "body": "Hi team, just a reminder about our project review meeting tomorrow at 2:30 PM in Conference Room B. Please bring your progress reports and be prepared to discuss the Q1 milestones. We'll also review the budget allocation for the next phase, discuss resource requirements, and plan the timeline for deliverables. Sarah will present the technical architecture updates, and Mike will cover the marketing strategy. Please review the attached documents before the meeting.",
+    "sender": "manager@company.com",
+    "recipient": "team@company.com",
+    "category": "Work",
+    "language": "en",
+    "timestamp": "2024-01-15T14:30:00Z"
+  },
+  {
+    "id": "email_004",
+    "subject": "Yarınki Proje Toplantısı - B Konferans Salonu",
+    "body": "Merhaba ekip, yarın saat 14:30'da B Konferans Salonu'nda yapılacak proje değerlendirme toplantısını hatırlatmak istiyorum. Lütfen ilerleme raporlarınızı getirin ve Q1 kilometre taşlarını tartışmaya hazır olun. Ayrıca bir sonraki aşama için bütçe tahsisini gözden geçireceğiz, kaynak gereksinimlerini tartışacağız ve teslimat zaman çizelgesini planlayacağız.",
+    "sender": "yonetici@sirket.com",
+    "recipient": "ekip@sirket.com",
+    "category": "Work",
+    "language": "tr",
+    "timestamp": "2024-01-15T15:00:00Z"
+  },
+  {
+    "id": "email_005",
+    "subject": "Happy Birthday! 🎉",
+    "body": "Wishing you the happiest of birthdays! Hope your special day is filled with joy, laughter, and all your favorite things. Looking forward to celebrating with you this weekend at the party! I've got a special surprise planned that I think you'll love. Can't wait to see your reaction! Remember to bring your camera because we're going to make some amazing memories together.",
+    "sender": "friend@personal.com",
+    "recipient": "user@example.com",
+    "category": "Personal",
+    "language": "en",
+    "timestamp": "2024-01-15T08:15:00Z"
+  },
+  {
+    "id": "email_006",
+    "subject": "URGENT: Verify Your Account Now!",
+    "body": "Your account has been temporarily suspended due to suspicious activity detected from an unknown location. Our security systems have flagged multiple failed login attempts from IP address 192.168.1.1. Click here immediately to verify your identity and restore access. Failure to act within 24 hours will result in permanent account closure and loss of all data. This is your final warning - act now to secure your account!",
+    "sender": "security@suspicious-domain.com",
+    "recipient": "user@example.com",
+    "category": "Spam",
+    "language": "en",
+    "timestamp": "2024-01-15T03:45:00Z"
+  },
+  {
+    "id": "email_007",
+    "subject": "Flash Sale: 70% Off Everything!",
+    "body": "Don't miss our biggest sale of the year! Get 70% off all items including electronics, clothing, home goods, and more. This incredible offer includes top brands like Apple, Samsung, Nike, and Adidas. Limited time offer - sale ends at midnight tonight. Free shipping on orders over $50, plus an additional 10% off for first-time customers. Use code FLASH70 at checkout. Shop now before it's too late - inventory is limited!",
+    "sender": "sales@megastore.com",
+    "recipient": "customer@example.com",
+    "category": "Promotional",
+    "language": "en",
+    "timestamp": "2024-01-15T11:20:00Z"
+  },
+  {
+    "id": "email_008",
+    "subject": "You have 5 new connections on LinkedIn",
+    "body": "Hi there! You have 5 new connection requests waiting for your response on LinkedIn. Connect with professionals in your network to expand your career opportunities, stay updated with industry news, and discover new job openings. Your pending connections include: John Smith (Software Engineer at Google), Maria Garcia (Product Manager at Microsoft), David Chen (Data Scientist at Amazon), Lisa Johnson (UX Designer at Apple), and Robert Wilson (Marketing Director at Tesla).",
+    "sender": "notifications@linkedin.com",
+    "recipient": "professional@example.com",
+    "category": "Social",
+    "language": "en",
+    "timestamp": "2024-01-15T16:45:00Z"
+  },
+  {
+    "id": "email_009",
+    "subject": "Monthly Bank Statement - January 2024",
+    "body": "Your monthly bank statement for January 2024 is now available for download. You can view your statement online through our secure portal or download a PDF copy for your records. This month's summary: 15 transactions, total deposits: $3,200.00, total withdrawals: $352.68, ending balance: $2,847.32. Notable transactions include salary deposit, utility payments, and grocery purchases. Contact our customer service team at 1-800-BANK-123 if you have any questions about your statement.",
+    "sender": "statements@bank.com",
+    "recipient": "customer@example.com",
+    "category": "Finance",
+    "language": "en",
+    "timestamp": "2024-01-15T06:00:00Z"
+  },
+  {
+    "id": "email_010",
+    "subject": "Flight Confirmation - NYC to LAX",
+    "body": "Your flight has been confirmed! Flight AA1234 from New York John F. Kennedy International Airport (JFK) to Los Angeles International Airport (LAX) on January 20, 2024. Departure: 8:30 AM EST, Arrival: 11:45 AM PST. Seat: 12A (Window). Please arrive at the airport at least 2 hours before departure for domestic flights. Mobile boarding pass is attached to this email. You can also access your boarding pass through our mobile app. Baggage allowance: 1 carry-on and 1 personal item included.",
+    "sender": "bookings@airline.com",
+    "recipient": "traveler@example.com",
+    "category": "Travel",
+    "language": "en",
+    "timestamp": "2024-01-15T19:30:00Z"
+  },
+  {
+    "id": "email_011",
+    "subject": "Order Shipped - Tracking Number Included",
+    "body": "Great news! Your order #12345 has been shipped and is on its way to you. Items in this shipment: MacBook Pro 14-inch (Space Gray), Magic Mouse, USB-C Cable. Tracking number: 1Z999AA1234567890. Estimated delivery: January 18, 2024, between 9:00 AM and 6:00 PM. You can track your package online at our website or through our mobile app. If you're not available for delivery, the package will be left at a secure location or with a neighbor.",
+    "sender": "shipping@onlinestore.com",
+    "recipient": "customer@example.com",
+    "category": "Shopping",
+    "language": "en",
+    "timestamp": "2024-01-15T13:15:00Z"
+  },
+  {
+    "id": "email_012",
+    "subject": "System Maintenance Notification",
+    "body": "Our systems will undergo scheduled maintenance on January 16, 2024, from 2:00 AM to 4:00 AM EST to improve performance and security. During this time, the following services may be temporarily unavailable: online banking, mobile app, customer portal, and phone support. Emergency services will remain available through our 24/7 hotline. We apologize for any inconvenience and appreciate your patience as we work to enhance your experience.",
+    "sender": "admin@service.com",
+    "recipient": "user@example.com",
+    "category": "Other",
+    "language": "en",
+    "timestamp": "2024-01-15T17:00:00Z"
+  },
+  {
+    "id": "email_013",
+    "subject": "Invitation: Annual Company Retreat",
+    "body": "You're invited to our Annual Company Retreat! Join us for three days of team building, strategic planning, and fun activities at the beautiful Mountain View Resort from March 15-17, 2024. The retreat will include workshops on leadership development, innovation sessions, outdoor activities like hiking and team challenges, and evening social events. All expenses are covered by the company. Please RSVP by February 1st and let us know about any dietary restrictions or accessibility needs.",
+    "sender": "hr@company.com",
+    "recipient": "employees@company.com",
+    "category": "Work",
+    "language": "en",
+    "timestamp": "2024-01-15T10:30:00Z"
+  },
+  {
+    "id": "email_014",
+    "subject": "Cryptocurrency Investment Opportunity - Act Fast!",
+    "body": "Exclusive investment opportunity! Get in on the ground floor of the next big cryptocurrency before it goes public. Our insider information suggests this coin will increase 1000% in the next month. Limited spots available - only 50 investors will be accepted. Send $500 minimum investment to secure your position. This is a once-in-a-lifetime opportunity that you cannot afford to miss. Contact us immediately for more details.",
+    "sender": "invest@crypto-scam.com",
+    "recipient": "victim@example.com",
+    "category": "Spam",
+    "language": "en",
+    "timestamp": "2024-01-15T22:15:00Z"
+  },
+  {
+    "id": "email_015",
+    "subject": "Weekend Plans?",
+    "body": "Hey! What are your plans for this weekend? I was thinking we could check out that new art exhibition downtown, grab lunch at the Italian place we've been wanting to try, and maybe catch a movie in the evening. The weather is supposed to be nice, so we could also do some outdoor activities if you prefer. Let me know what sounds good to you! Also, don't forget about Mom's birthday next week - we should plan something special.",
+    "sender": "sibling@family.com",
+    "recipient": "user@example.com",
+    "category": "Personal",
+    "language": "en",
+    "timestamp": "2024-01-15T18:45:00Z"
+  }
+]

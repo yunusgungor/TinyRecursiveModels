@@ -1,0 +1,117 @@
+# Email Classification Training Configuration for 8GB MacBook
+# Optimized for memory-constrained environments
+# Requirements: 2.1, 2.2
+
+# Model Architecture
+model:
+  name: "EmailTRM"
+  vocab_size: 3000  # Reduced for memory efficiency
+  hidden_size: 256  # Smaller model for 8GB
+  num_layers: 2
+  num_email_categories: 10
+  max_sequence_length: 256  # Shorter sequences for memory
+
+# Training Parameters
+training:
+  batch_size: 2  # Very small batch for 8GB
+  gradient_accumulation_steps: 16  # Compensate with accumulation
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  max_epochs: 15  # More epochs with smaller batches
+  max_steps: 5000
+  warmup_steps: 200
+  
+  # Optimization for memory
+  use_mixed_precision: false  # Avoid on older MacBooks
+  gradient_checkpointing: true
+  dataloader_num_workers: 1  # Minimal workers
+
+# Email-Specific Configuration
+email:
+  use_email_structure: true
+  subject_attention_weight: 1.8  # Slightly lower for stability
+  pooling_strategy: "weighted"
+  enable_subject_prioritization: true
+  use_hierarchical_attention: false  # Disable for memory
+  email_augmentation_prob: 0.2  # Lower augmentation
+
+# MacBook Optimization
+hardware:
+  memory_limit_mb: 5500  # Conservative limit for 8GB
+  enable_memory_monitoring: true
+  dynamic_batch_sizing: true
+  use_cpu_optimization: true
+  thermal_monitoring: true
+  
+  # CPU settings
+  num_workers: 1
+  cpu_threads: 4  # Conservative threading
+  
+  # Memory management
+  garbage_collection_frequency: 100  # More frequent GC
+  checkpoint_memory_cleanup: true
+
+# Performance Targets
+targets:
+  target_accuracy: 0.93  # Slightly lower target for constrained setup
+  min_category_accuracy: 0.85
+  early_stopping_patience: 8  # More patience for slower convergence
+
+# Data Configuration
+data:
+  train_split: 0.8
+  val_split: 0.2
+  shuffle_buffer_size: 1000  # Smaller buffer
+  prefetch_factor: 1
+  
+  # Memory-efficient loading
+  streaming_mode: true
+  chunk_size: 500
+  cache_preprocessed: false  # Don't cache to save memory
+
+# Checkpointing
+checkpointing:
+  save_interval_steps: 1000
+  max_checkpoints: 2  # Keep fewer checkpoints
+  save_optimizer_state: false  # Save memory
+  compression: true
+
+# Logging and Monitoring
+logging:
+  log_interval: 50
+  eval_interval: 500
+  save_interval: 1000
+  
+  # Resource monitoring
+  monitor_memory: true
+  monitor_cpu: true
+  monitor_temperature: true
+  
+  # Wandb settings
+  use_wandb: true
+  wandb_project: "email-classification-8gb"
+
+# Training Strategy
+strategy:
+  type: "multi_phase"
+  phases:
+    - name: "warmup"
+      steps: 1000
+      learning_rate_factor: 0.5
+      batch_size_factor: 0.5
+    - name: "main"
+      steps: 3000
+      learning_rate_factor: 1.0
+      batch_size_factor: 1.0
+    - name: "fine_tune"
+      steps: 1000
+      learning_rate_factor: 0.1
+      batch_size_factor: 0.5
+
+# Error Handling
+error_handling:
+  max_retries: 3
+  retry_delay: 5
+  graceful_degradation: true
+  auto_reduce_batch_size: true
+  memory_pressure_threshold: 0.85

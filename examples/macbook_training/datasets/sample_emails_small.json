@@ -1,0 +1,102 @@
+[
+  {
+    "id": "email_001",
+    "subject": "Weekly Tech Newsletter - AI Advances",
+    "body": "This week's newsletter covers the latest advances in artificial intelligence, machine learning breakthroughs, and emerging technology trends. Our team has compiled the most important developments from leading research institutions and tech companies.",
+    "sender": "newsletter@techweekly.com",
+    "recipient": "subscriber@example.com",
+    "category": "Newsletter",
+    "language": "en",
+    "timestamp": "2024-01-15T09:00:00Z"
+  },
+  {
+    "id": "email_002",
+    "subject": "Project Meeting Tomorrow - Conference Room B",
+    "body": "Hi team, just a reminder about our project review meeting tomorrow at 2:30 PM in Conference Room B. Please bring your progress reports and be prepared to discuss the Q1 milestones. We'll also review the budget allocation for the next phase.",
+    "sender": "manager@company.com",
+    "recipient": "team@company.com",
+    "category": "Work",
+    "language": "en",
+    "timestamp": "2024-01-15T14:30:00Z"
+  },
+  {
+    "id": "email_003",
+    "subject": "Happy Birthday! 🎉",
+    "body": "Wishing you the happiest of birthdays! Hope your special day is filled with joy, laughter, and all your favorite things. Looking forward to celebrating with you this weekend at the party!",
+    "sender": "friend@personal.com",
+    "recipient": "user@example.com",
+    "category": "Personal",
+    "language": "en",
+    "timestamp": "2024-01-15T08:15:00Z"
+  },
+  {
+    "id": "email_004",
+    "subject": "URGENT: Verify Your Account Now!",
+    "body": "Your account has been temporarily suspended due to suspicious activity. Click here immediately to verify your identity and restore access. Failure to act within 24 hours will result in permanent account closure. Act now!",
+    "sender": "security@suspicious-domain.com",
+    "recipient": "user@example.com",
+    "category": "Spam",
+    "language": "en",
+    "timestamp": "2024-01-15T03:45:00Z"
+  },
+  {
+    "id": "email_005",
+    "subject": "Flash Sale: 70% Off Everything!",
+    "body": "Don't miss our biggest sale of the year! Get 70% off all items including electronics, clothing, and home goods. Limited time offer - sale ends at midnight tonight. Free shipping on orders over $50. Shop now before it's too late!",
+    "sender": "sales@megastore.com",
+    "recipient": "customer@example.com",
+    "category": "Promotional",
+    "language": "en",
+    "timestamp": "2024-01-15T11:20:00Z"
+  },
+  {
+    "id": "email_006",
+    "subject": "You have 5 new connections on LinkedIn",
+    "body": "Hi there! You have 5 new connection requests waiting for your response. Connect with professionals in your network to expand your career opportunities and stay updated with industry news.",
+    "sender": "notifications@linkedin.com",
+    "recipient": "professional@example.com",
+    "category": "Social",
+    "language": "en",
+    "timestamp": "2024-01-15T16:45:00Z"
+  },
+  {
+    "id": "email_007",
+    "subject": "Monthly Bank Statement - January 2024",
+    "body": "Your monthly bank statement for January 2024 is now available. You can view your statement online or download a PDF copy. This month's summary: 15 transactions, ending balance: $2,847.32. Contact us if you have any questions.",
+    "sender": "statements@bank.com",
+    "recipient": "customer@example.com",
+    "category": "Finance",
+    "language": "en",
+    "timestamp": "2024-01-15T06:00:00Z"
+  },
+  {
+    "id": "email_008",
+    "subject": "Flight Confirmation - NYC to LAX",
+    "body": "Your flight has been confirmed! Flight AA1234 from New York (JFK) to Los Angeles (LAX) on January 20, 2024, departure 8:30 AM, arrival 11:45 AM PST. Please arrive at the airport 2 hours before departure. Mobile boarding pass attached.",
+    "sender": "bookings@airline.com",
+    "recipient": "traveler@example.com",
+    "category": "Travel",
+    "language": "en",
+    "timestamp": "2024-01-15T19:30:00Z"
+  },
+  {
+    "id": "email_009",
+    "subject": "Order Shipped - Tracking Number Included",
+    "body": "Great news! Your order #12345 has been shipped and is on its way to you. Tracking number: 1Z999AA1234567890. Estimated delivery: January 18, 2024. You can track your package online or through our mobile app.",
+    "sender": "shipping@onlinestore.com",
+    "recipient": "customer@example.com",
+    "category": "Shopping",
+    "language": "en",
+    "timestamp": "2024-01-15T13:15:00Z"
+  },
+  {
+    "id": "email_010",
+    "subject": "System Maintenance Notification",
+    "body": "Our systems will undergo scheduled maintenance on January 16, 2024, from 2:00 AM to 4:00 AM EST. During this time, some services may be temporarily unavailable. We apologize for any inconvenience and appreciate your patience.",
+    "sender": "admin@service.com",
+    "recipient": "user@example.com",
+    "category": "Other",
+    "language": "en",
+    "timestamp": "2024-01-15T17:00:00Z"
+  }
+]

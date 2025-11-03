@@ -1,0 +1,156 @@
+# Email Classification Training Configuration for 32GB+ MacBook
+# High-performance configuration for memory-rich environments
+# Requirements: 2.1, 2.2
+
+# Model Architecture
+model:
+  name: "EmailTRM"
+  vocab_size: 8000  # Large vocabulary for better coverage
+  hidden_size: 512  # Full model size
+  num_layers: 3  # Deeper model
+  num_email_categories: 10
+  max_sequence_length: 768  # Extended sequence length
+
+# Training Parameters
+training:
+  batch_size: 8  # Larger batch size
+  gradient_accumulation_steps: 4  # Less accumulation needed
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  max_epochs: 10
+  max_steps: 10000
+  warmup_steps: 500
+  
+  # Optimization settings
+  use_mixed_precision: false  # Conservative for stability
+  gradient_checkpointing: false  # Disable for speed with ample memory
+  dataloader_num_workers: 4  # More workers
+
+# Email-Specific Configuration
+email:
+  use_email_structure: true
+  subject_attention_weight: 2.2  # Higher weight for complex model
+  pooling_strategy: "attention"  # More sophisticated pooling
+  enable_subject_prioritization: true
+  use_hierarchical_attention: true
+  email_augmentation_prob: 0.4  # Higher augmentation for robustness
+
+# MacBook Optimization
+hardware:
+  memory_limit_mb: 24000  # Use ~75% of 32GB
+  enable_memory_monitoring: true
+  dynamic_batch_sizing: false  # Fixed batch size for consistency
+  use_cpu_optimization: true
+  thermal_monitoring: true
+  
+  # CPU settings
+  num_workers: 4
+  cpu_threads: 8  # Utilize more threads
+  
+  # Memory management
+  garbage_collection_frequency: 500  # Less frequent GC
+  checkpoint_memory_cleanup: false  # Keep in memory for speed
+
+# Performance Targets
+targets:
+  target_accuracy: 0.96  # Higher target for powerful setup
+  min_category_accuracy: 0.92
+  early_stopping_patience: 3  # Less patience with faster training
+
+# Data Configuration
+data:
+  train_split: 0.8
+  val_split: 0.2
+  shuffle_buffer_size: 5000  # Large buffer
+  prefetch_factor: 4
+  
+  # High-performance loading
+  streaming_mode: false  # Load full dataset
+  chunk_size: 2000
+  cache_preprocessed: true  # Cache everything
+  preload_data: true  # Preload for speed
+
+# Checkpointing
+checkpointing:
+  save_interval_steps: 500
+  max_checkpoints: 5  # Keep more checkpoints
+  save_optimizer_state: true
+  compression: false  # No compression for speed
+
+# Logging and Monitoring
+logging:
+  log_interval: 20
+  eval_interval: 200
+  save_interval: 500
+  
+  # Resource monitoring
+  monitor_memory: true
+  monitor_cpu: true
+  monitor_temperature: true
+  
+  # Wandb settings
+  use_wandb: true
+  wandb_project: "email-classification-32gb"
+
+# Training Strategy
+strategy:
+  type: "progressive"  # More sophisticated strategy
+  phases:
+    - name: "simple_model"
+      steps: 2000
+      model_complexity: 0.6
+      learning_rate_factor: 1.2
+    - name: "medium_model"
+      steps: 4000
+      model_complexity: 0.8
+      learning_rate_factor: 1.0
+    - name: "full_model"
+      steps: 4000
+      model_complexity: 1.0
+      learning_rate_factor: 0.8
+
+# Error Handling
+error_handling:
+  max_retries: 5
+  retry_delay: 2
+  graceful_degradation: true
+  auto_reduce_batch_size: false  # Don't auto-reduce with ample memory
+  memory_pressure_threshold: 0.75
+
+# Advanced Features
+advanced:
+  # Ensemble training
+  enable_ensemble: true
+  ensemble_size: 3
+  ensemble_strategy: "diverse_init"
+  
+  # Hyperparameter optimization
+  enable_auto_tuning: true
+  tuning_trials: 15
+  tuning_strategy: "bayesian"
+  
+  # Model compression and optimization
+  enable_pruning: false  # Keep full model
+  enable_quantization: false
+  
+  # Advanced training techniques
+  enable_curriculum_learning: true
+  curriculum_strategy: "difficulty_based"
+  
+  # Multi-task learning (if applicable)
+  enable_multi_task: false
+  auxiliary_tasks: []
+
+# Experimental Features
+experimental:
+  # Advanced attention mechanisms
+  use_sparse_attention: false
+  attention_dropout: 0.1
+  
+  # Advanced regularization
+  use_dropout_scheduling: true
+  use_weight_noise: false
+  
+  # Performance optimizations
+  use_gradient_compression: false
+  use_model_parallelism: false  # Single machine setup
