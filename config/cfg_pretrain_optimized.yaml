@@ -8,29 +8,29 @@ hydra:
 
 # Data path - using our demo dataset
 data_paths: ['data/arc-demo']
-data_paths_test: ['data/arc-demo']
+data_paths_test: []  # Disable test for now
 
 evaluators: []  # Disable evaluators for speed
 
-# Optimized hyperparams for MacBook
-global_batch_size: 8  # Small but reasonable
+# Very conservative hyperparams for MacBook
+global_batch_size: 4  # Very small for stability
 
-epochs: 6  # Reasonable number
+epochs: 4  # Small number for demo
 eval_interval: 2
 checkpoint_every_eval: True
 
-lr: 1e-4
+lr: 5e-5  # Smaller learning rate
 lr_min_ratio: 1.0
-lr_warmup_steps: 20
+lr_warmup_steps: 10  # Fewer warmup steps
 
 # Standard hyperparameter settings
 beta1: 0.9
 beta2: 0.95
-weight_decay: 0.05  # Reduced
-puzzle_emb_weight_decay: 0.05
+weight_decay: 0.01  # Very small
+puzzle_emb_weight_decay: 0.01
 
 # Hyperparams - Puzzle embeddings training
-puzzle_emb_lr: 1e-2
+puzzle_emb_lr: 1e-3  # Smaller
 
 seed: 42
 min_eval_interval: 0
@@ -40,6 +40,6 @@ ema_rate: 0.999
 freeze_weights: False
 
 # MacBook-specific settings
-project_name: "MacBook-TRM-Optimized"
-run_name: "optimized-run"
-checkpoint_path: "checkpoints/optimized"
+project_name: "MacBook-TRM-Demo"
+run_name: "demo-run"
+checkpoint_path: "checkpoints/demo"

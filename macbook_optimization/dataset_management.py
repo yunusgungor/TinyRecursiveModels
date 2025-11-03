@@ -582,6 +582,44 @@ class DatasetManager:
         
         return dataset
     
+    def get_loading_recommendations(self, dataset_path: str) -> Dict[str, Any]:
+        """
+        Get loading recommendations for a dataset.
+        
+        Args:
+            dataset_path: Path to dataset
+            
+        Returns:
+            Loading recommendations and dataset info
+        """
+        # Analyze dataset requirements
+        analysis = self.analyze_dataset_requirements([dataset_path], "train")
+        
+        # Calculate recommended batch size based on memory
+        memory_stats = self.memory_manager.monitor_memory_usage()
+        available_memory_mb = memory_stats.available_mb
+        
+        # Conservative batch size calculation
+        if analysis['total_size_mb'] < 100:
+            recommended_batch_size = 8
+        elif analysis['total_size_mb'] < 500:
+            recommended_batch_size = 4
+        else:
+            recommended_batch_size = 2
+        
+        return {
+            'dataset_info': {
+                'total_size_mb': analysis['total_size_mb'],
+                'loading_strategy': analysis['recommended_strategy'],
+                'memory_utilization_percent': analysis['memory_utilization_percent']
+            },
+            'recommendations': {
+                'batch_size': recommended_batch_size,
+                'use_streaming': analysis['requires_streaming'],
+                'enable_caching': analysis['total_size_mb'] < self.config.cache_threshold_mb
+            }
+        }
+    
     def validate_dataset_memory_constraints(self, dataset_paths: List[str],
                                           batch_size: int, split: str = "train") -> Dict[str, Any]:
         """

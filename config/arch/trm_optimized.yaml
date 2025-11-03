@@ -6,17 +6,17 @@ loss:
 
 # Optimized parameters for MacBook
 halt_exploration_prob: 0.1
-halt_max_steps: 8  # Reduced from 16
+halt_max_steps: 6  # Reduced from 16
 
 H_cycles: 2  # Reduced from 3
-L_cycles: 4  # Reduced from 6
+L_cycles: 3  # Reduced from 6
 
 H_layers: 0
 L_layers: 2  # Keep 2 layers for reasonable capacity
 
-hidden_size: 256  # Reduced from 512
-num_heads: 4  # Reduced from 8
-expansion: 3  # Reduced from 4
+hidden_size: 128  # Further reduced for MacBook
+num_heads: 2  # Reduced from 8
+expansion: 2  # Reduced from 4
 
 puzzle_emb_ndim: 0  # Disable sparse embedding for simplicity
 

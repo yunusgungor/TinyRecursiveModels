@@ -134,7 +134,7 @@ def create_optimized_dataloaders(dataset_paths: List[str],
                 batch_size=None,  # Batch size handled by PuzzleDataset
                 num_workers=0,    # Conservative for MacBook
                 pin_memory=False, # CPU training
-                prefetch_factor=2
+                prefetch_factor=None  # Must be None when num_workers=0
             )
             
             results[split] = {

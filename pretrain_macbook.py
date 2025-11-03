@@ -312,7 +312,7 @@ class MacBookTRMTrainer:
             **config.arch.__pydantic_extra__,  # type: ignore
             batch_size=effective_batch_size,  # Use effective batch size for sparse embedding
             vocab_size=train_metadata.vocab_size,
-            seq_len=min(train_metadata.seq_len, training_params.max_sequence_length),
+            seq_len=train_metadata.seq_len,  # Use actual dataset sequence length
             num_puzzle_identifiers=train_metadata.num_puzzle_identifiers,
             causal=False  # Non-autoregressive
         )
@@ -779,23 +779,9 @@ class MacBookTRMTrainer:
             global_batch_size=config_result.training_params.effective_batch_size
         )
         
-        try:
-            if self.base_config.data_paths_test:
-                test_analysis = self.dataset_manager.analyze_dataset_requirements(
-                    self.base_config.data_paths_test, "test"
-                )
-                print(f"Test dataset analysis:")
-                print(f"  Total size: {test_analysis['total_size_mb']:.1f}MB")
-                print(f"  Recommended strategy: {test_analysis['recommended_strategy']}")
-            
-            eval_loader, eval_metadata = self.create_macbook_dataloader(
-                self.base_config, "test", config_result.training_params,
-                test_set_mode=True, epochs_per_iter=1,
-                global_batch_size=config_result.training_params.effective_batch_size
-            )
-        except:
-            print("No evaluation data found")
-            eval_loader = eval_metadata = None
+        # Disable evaluation for MacBook demo
+        print("Evaluation disabled for MacBook demo")
+        eval_loader = eval_metadata = None
         
         # Create evaluators
         try:
@@ -943,7 +929,7 @@ class MacBookTRMTrainer:
                         self.save_checkpoint_macbook(macbook_state, config_result.training_params)
                 
                 # Evaluation phase
-                if iter_id >= self.base_config.min_eval_interval and eval_loader:
+                if iter_id >= self.base_config.min_eval_interval and eval_loader is not None:
                     print("\nRunning evaluation...")
                     
                     # Use EMA model if available
