@@ -22,8 +22,9 @@ from models.recursive_reasoning.trm import (
     TinyRecursiveReasoningModel_ACTV1ReasoningModule,
     TinyRecursiveReasoningModel_ACTV1InnerCarry
 )
-from models.common import CastedEmbedding, CastedSparseEmbedding, CastedLinear, trunc_normal_init_
-from models.layers import rms_norm, SwiGLU, Attention, RotaryEmbedding, CosSin
+from models.common import trunc_normal_init_
+from models.layers import rms_norm, SwiGLU, Attention, RotaryEmbedding, CosSin, CastedEmbedding, CastedLinear
+from models.sparse_embedding import CastedSparseEmbedding
 
 
 @dataclass
