@@ -392,7 +392,7 @@ class EmailTrainingLoop:
         loss = self._compute_email_loss(outputs, labels)
         
         # Scale loss for gradient accumulation
-        loss = loss / self.config.gradient_accumulation_steps
+        loss = loss / max(self.config.gradient_accumulation_steps, 1)  # Avoid division by zero
         
         # Backward pass
         loss.backward()
@@ -473,11 +473,11 @@ class EmailTrainingLoop:
         
         # Compute final metrics
         metrics = EmailTrainingMetrics()
-        metrics.loss = total_loss / total_samples
+        metrics.loss = total_loss / max(total_samples, 1)  # Avoid division by zero
         
         # Overall accuracy
         correct_predictions = sum(p == l for p, l in zip(all_predictions, all_labels))
-        metrics.accuracy = correct_predictions / len(all_labels)
+        metrics.accuracy = correct_predictions / max(len(all_labels), 1)  # Avoid division by zero
         
         # Per-category accuracies
         for category in range(self.config.num_email_categories):
@@ -550,7 +550,7 @@ class EmailTrainingLoop:
                     
                     # Performance tracking
                     step_time = time.time() - step_start_time
-                    step_metrics.samples_per_second = batch["input_ids"].size(0) / step_time
+                    step_metrics.samples_per_second = batch["input_ids"].size(0) / max(step_time, 1e-6)  # Avoid division by zero
                     
                     # Logging
                     if self.current_step % self.config.log_interval == 0:
@@ -644,22 +644,23 @@ class EmailTrainingLoop:
         
         avg_metrics = EmailTrainingMetrics()
         
-        # Simple averages
-        avg_metrics.loss = sum(m.loss for m in metrics_list) / len(metrics_list)
-        avg_metrics.accuracy = sum(m.accuracy for m in metrics_list) / len(metrics_list)
-        avg_metrics.f1_macro = sum(m.f1_macro for m in metrics_list) / len(metrics_list)
-        avg_metrics.f1_micro = sum(m.f1_micro for m in metrics_list) / len(metrics_list)
-        avg_metrics.learning_rate = metrics_list[-1].learning_rate  # Use last LR
-        avg_metrics.gradient_norm = sum(m.gradient_norm for m in metrics_list) / len(metrics_list)
-        avg_metrics.num_reasoning_cycles = sum(m.num_reasoning_cycles for m in metrics_list) / len(metrics_list)
-        avg_metrics.memory_usage_mb = sum(m.memory_usage_mb for m in metrics_list) / len(metrics_list)
-        avg_metrics.memory_usage_percent = sum(m.memory_usage_percent for m in metrics_list) / len(metrics_list)
-        avg_metrics.samples_per_second = sum(m.samples_per_second for m in metrics_list) / len(metrics_list)
+        # Simple averages (avoid division by zero)
+        metrics_count = max(len(metrics_list), 1)
+        avg_metrics.loss = sum(m.loss for m in metrics_list) / metrics_count
+        avg_metrics.accuracy = sum(m.accuracy for m in metrics_list) / metrics_count
+        avg_metrics.f1_macro = sum(m.f1_macro for m in metrics_list) / metrics_count
+        avg_metrics.f1_micro = sum(m.f1_micro for m in metrics_list) / metrics_count
+        avg_metrics.learning_rate = metrics_list[-1].learning_rate if metrics_list else 0.0  # Use last LR
+        avg_metrics.gradient_norm = sum(m.gradient_norm for m in metrics_list) / metrics_count
+        avg_metrics.num_reasoning_cycles = sum(m.num_reasoning_cycles for m in metrics_list) / metrics_count
+        avg_metrics.memory_usage_mb = sum(m.memory_usage_mb for m in metrics_list) / metrics_count
+        avg_metrics.memory_usage_percent = sum(m.memory_usage_percent for m in metrics_list) / metrics_count
+        avg_metrics.samples_per_second = sum(m.samples_per_second for m in metrics_list) / metrics_count
         
         # Category metrics (average non-zero values)
         for category in range(self.config.num_email_categories):
             category_accs = [m.category_accuracies.get(category, 0) for m in metrics_list if category in m.category_accuracies]
             if category_accs:
-                avg_metrics.category_accuracies[category] = sum(category_accs) / len(category_accs)
+                avg_metrics.category_accuracies[category] = sum(category_accs) / max(len(category_accs), 1)
         
         return avg_metrics

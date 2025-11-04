@@ -431,6 +431,10 @@ class EmailDatasetManager(DatasetManager):
             strategy = "memory"
             memory_usage_mb = analysis['total_size_mb'] * 1.2  # 20% overhead
         
+        # Validate dataset is not empty
+        if len(dataset) == 0:
+            raise ValueError(f"Dataset is empty! No valid emails found in {dataset_path}/{split}")
+        
         # Record metrics
         load_time = time.time() - start_time
         metrics = EmailDatasetMetrics(
@@ -625,16 +629,19 @@ class EmailDatasetManager(DatasetManager):
         dataloader_config = {
             'batch_size': optimized_batch_size,
             'shuffle': split == "train",
-            'num_workers': min(self.config.num_workers if hasattr(self.config, 'num_workers') else 2, 4),
+            'num_workers': 0,  # Disable multiprocessing to avoid collate issues
             'pin_memory': False,  # Better for MacBook
             'drop_last': split == "train"
         }
         dataloader_config.update(kwargs)
         
-        # Create dataloader
+        # Create dataloader with custom collate function
         if isinstance(dataset, StreamingEmailDataset):
             # For streaming datasets, don't shuffle (handled internally)
             dataloader_config['shuffle'] = False
+        
+        # Add custom collate function to handle metadata properly
+        dataloader_config['collate_fn'] = self._email_collate_fn
         
         dataloader = DataLoader(dataset, **dataloader_config)
         
@@ -648,6 +655,65 @@ class EmailDatasetManager(DatasetManager):
         }
         
         return dataloader, creation_info
+    
+    def _email_collate_fn(self, batch):
+        """Custom collate function for email batches to handle metadata properly."""
+        try:
+            # Separate the different fields
+            input_ids = []
+            attention_masks = []
+            labels = []
+            email_ids = []
+            categories = []
+            metadatas = []
+            
+            for sample in batch:
+                input_ids.append(sample['input_ids'])
+                attention_masks.append(sample['attention_mask'])
+                labels.append(sample['labels'])
+                email_ids.append(sample['email_id'])
+                categories.append(sample['category'])
+                metadatas.append(sample['metadata'])
+            
+            # Stack tensors
+            if TORCH_AVAILABLE:
+                import torch
+                batched = {
+                    'input_ids': torch.stack(input_ids),
+                    'attention_mask': torch.stack(attention_masks),
+                    'labels': torch.stack(labels),
+                    'email_id': email_ids,  # Keep as list
+                    'category': categories,  # Keep as list
+                    'metadata': metadatas  # Keep as list of dicts
+                }
+            else:
+                import numpy as np
+                batched = {
+                    'input_ids': np.stack(input_ids),
+                    'attention_mask': np.stack(attention_masks),
+                    'labels': np.stack(labels),
+                    'email_id': email_ids,
+                    'category': categories,
+                    'metadata': metadatas
+                }
+            
+            return batched
+            
+        except Exception as e:
+            # Fallback: if there's still an issue, provide more detailed error info
+            logger.error(f"Error in email collate function: {e}")
+            logger.error(f"Batch size: {len(batch)}")
+            if batch:
+                sample = batch[0]
+                logger.error(f"Sample keys: {list(sample.keys())}")
+                for key, value in sample.items():
+                    if hasattr(value, 'shape'):
+                        logger.error(f"  {key} shape: {value.shape}")
+                    elif hasattr(value, '__len__'):
+                        logger.error(f"  {key} length: {len(value)}")
+                    else:
+                        logger.error(f"  {key} type: {type(value)}")
+            raise
     
     def validate_email_dataset(self, dataset_path: str, split: str = "train") -> Dict[str, Any]:
         """

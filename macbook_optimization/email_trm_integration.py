@@ -48,31 +48,32 @@ if EMAIL_TRM_AVAILABLE:
             # MacBook-specific defaults
             macbook_defaults = {
                 # Reduced model complexity for memory constraints
-                'hidden_size': 256,  # Reduced from 512
                 'L_layers': 2,       # Reduced from 4
                 'H_cycles': 2,       # Reduced from 4
                 'L_cycles': 3,       # Reduced from 6
-                'halt_max_steps': 6, # Reduced from 8
                 
                 # Memory-efficient settings
                 'classification_dropout': 0.2,  # Increased for regularization
                 'use_email_structure': True,
                 'use_hierarchical_attention': True,
                 'pooling_strategy': 'weighted',
-                
-                # CPU optimization flags
-                'enable_cpu_optimization': True,
-                'use_mixed_precision': False,  # Not recommended for CPU
-                'gradient_checkpointing': True,  # Save memory
             }
             
             # Apply defaults, then override with provided kwargs
             config_dict = {**macbook_defaults, **kwargs}
+            
+            # Remove MacBook-specific parameters that don't belong in parent config
+            macbook_specific_params = {
+                'enable_cpu_optimization': config_dict.pop('enable_cpu_optimization', True),
+                'use_mixed_precision': config_dict.pop('use_mixed_precision', False),
+                'gradient_checkpointing': config_dict.pop('gradient_checkpointing', True),
+            }
+            
             super().__init__(**config_dict)
             
             # MacBook-specific attributes
-            self.enable_cpu_optimization = config_dict.get('enable_cpu_optimization', True)
-            self.use_mixed_precision = config_dict.get('use_mixed_precision', False)
+            self.enable_cpu_optimization = macbook_specific_params['enable_cpu_optimization']
+            self.use_mixed_precision = macbook_specific_params['use_mixed_precision']
             self.gradient_checkpointing = config_dict.get('gradient_checkpointing', True)
             self.dynamic_complexity = config_dict.get('dynamic_complexity', True)
             self.memory_efficient_attention = config_dict.get('memory_efficient_attention', True)
@@ -120,35 +121,34 @@ if EMAIL_TRM_AVAILABLE and TORCH_AVAILABLE:
                 config: MacBook EmailTRM configuration
                 hardware_specs: Hardware specifications for optimization
             """
+            super().__init__()
             
-        super().__init__()
-        
-        self.config = config
-        self.hardware_specs = hardware_specs or self._detect_hardware()
-        
-        # Initialize memory manager
-        self.memory_manager = MemoryManager()
-        
-        # Adjust configuration based on hardware constraints
-        self.adjusted_config = self._adjust_config_for_hardware(config)
-        
-        # Create the core EmailTRM model with adjusted config
-        self.email_trm = EmailTRM(self.adjusted_config)
-        
-        # CPU optimization setup
-        if config.enable_cpu_optimization:
-            self._setup_cpu_optimizations()
-        
-        # Memory optimization setup
-        self._setup_memory_optimizations()
-        
-        # Track model complexity
-        self.current_complexity_factor = 1.0
-        self.base_hidden_size = self.adjusted_config.hidden_size
-        
-        logger.info(f"MacBookEmailTRM initialized with {self._count_parameters():,} parameters")
-        logger.info(f"Hardware: {self.hardware_specs.cpu.cores} cores, "
-                   f"{self.hardware_specs.memory.available_memory / (1024**3):.1f}GB available")
+            self.config = config
+            self.hardware_specs = hardware_specs or self._detect_hardware()
+            
+            # Initialize memory manager
+            self.memory_manager = MemoryManager()
+            
+            # Adjust configuration based on hardware constraints
+            self.adjusted_config = self._adjust_config_for_hardware(config)
+            
+            # Create the core EmailTRM model with adjusted config
+            self.email_trm = EmailTRM(self.adjusted_config)
+            
+            # CPU optimization setup
+            if config.enable_cpu_optimization:
+                self._setup_cpu_optimizations()
+            
+            # Memory optimization setup
+            self._setup_memory_optimizations()
+            
+            # Track model complexity
+            self.current_complexity_factor = 1.0
+            self.base_hidden_size = self.adjusted_config.hidden_size
+            
+            logger.info(f"MacBookEmailTRM initialized with {self._count_parameters():,} parameters")
+            logger.info(f"Hardware: {self.hardware_specs.cpu.cores} cores, "
+                       f"{self.hardware_specs.memory.available_memory / (1024**3):.1f}GB available")
     
     def _detect_hardware(self) -> HardwareSpecs:
         """Detect hardware specifications."""

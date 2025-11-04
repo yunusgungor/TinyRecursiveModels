@@ -40,6 +40,11 @@ class EmailTrainingConfig:
     max_epochs: int = 10
     max_steps: int = 10000
     
+    # Learning rate scheduling
+    use_lr_scheduler: bool = True
+    lr_scheduler_type: str = "cosine"  # "cosine", "linear", "exponential"
+    warmup_steps: int = 100
+    
     # Email-specific parameters
     max_sequence_length: int = 512
     use_email_structure: bool = True
@@ -68,6 +73,18 @@ class EmailTrainingConfig:
     target_accuracy: float = 0.95
     min_category_accuracy: float = 0.90
     early_stopping_patience: int = 5
+    early_stopping_min_delta: float = 0.001
+    
+    # Loss function weights
+    classification_loss_weight: float = 1.0
+    halt_loss_weight: float = 0.01
+    contrastive_loss_weight: float = 0.1
+    calibration_loss_weight: float = 0.05
+    
+    # Training control
+    max_grad_norm: float = 1.0
+    log_interval: int = 50
+    eval_interval: int = 200
     
     # Email-specific optimization flags
     enable_subject_prioritization: bool = True

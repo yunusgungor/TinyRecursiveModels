@@ -87,10 +87,6 @@ class PerformanceMetrics:
     avg_confidence: float
     calibration_error: float
     
-    # Robustness metrics
-    robustness_score: Optional[float] = None
-    adversarial_robustness: Optional[float] = None
-    
     # Efficiency metrics
     inference_time_ms: float
     throughput_samples_per_sec: float
@@ -105,6 +101,10 @@ class PerformanceMetrics:
     peak_memory_mb: float
     avg_cpu_usage: float
     total_compute_hours: float
+    
+    # Robustness metrics
+    robustness_score: Optional[float] = None
+    adversarial_robustness: Optional[float] = None
 
 
 @dataclass
