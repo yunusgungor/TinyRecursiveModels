@@ -873,10 +873,11 @@ def run_validation_and_benchmarking_tests():
     test_suite = unittest.TestSuite()
     
     # Add test cases
-    test_suite.addTest(unittest.makeSuite(TestAccuracyValidationSystem))
-    test_suite.addTest(unittest.makeSuite(TestRobustnessTestingSystem))
-    test_suite.addTest(unittest.makeSuite(TestPerformanceBenchmarkingSystem))
-    test_suite.addTest(unittest.makeSuite(TestIntegrationScenarios))
+    loader = unittest.TestLoader()
+    test_suite.addTest(loader.loadTestsFromTestCase(TestAccuracyValidationSystem))
+    test_suite.addTest(loader.loadTestsFromTestCase(TestRobustnessTestingSystem))
+    test_suite.addTest(loader.loadTestsFromTestCase(TestPerformanceBenchmarkingSystem))
+    test_suite.addTest(loader.loadTestsFromTestCase(TestIntegrationScenarios))
     
     # Run tests
     runner = unittest.TextTestRunner(verbosity=2)
