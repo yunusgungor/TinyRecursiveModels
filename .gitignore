@@ -161,3 +161,5 @@ cython_debug/
 wandb/
 checkpoints/
 credentials.json
+token.json
+token.key
