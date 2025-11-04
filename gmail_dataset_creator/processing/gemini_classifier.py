@@ -458,11 +458,11 @@ class GeminiClassifier:
                     contents=[
                         types.Content(
                             role='user',
-                            parts=[types.Part.from_text(ClassificationPrompt.SYSTEM_PROMPT)]
+                            parts=[types.Part(text=ClassificationPrompt.SYSTEM_PROMPT)]
                         ),
                         types.Content(
                             role='user',
-                            parts=[types.Part.from_text(prompt)]
+                            parts=[types.Part(text=prompt)]
                         )
                     ],
                     config=types.GenerateContentConfig(

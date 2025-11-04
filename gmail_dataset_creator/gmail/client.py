@@ -201,17 +201,8 @@ class GmailAPIClient:
         self.rate_limiter = RateLimiter(self.rate_limit_config)
         self.logger = logging.getLogger(__name__)
         
-        # Enhanced logging components
-        from ..utils.logging import get_api_logger, get_error_logger
-        from ..utils.process_state import NetworkInterruptionHandler
-        self.api_logger = get_api_logger(__name__)
-        self.error_logger = get_error_logger(__name__)
-        self.network_handler = NetworkInterruptionHandler(
-            max_retries=3,
-            base_delay=1.0,
-            max_delay=30.0,
-            backoff_factor=2.0
-        )
+        # Basic logging
+        self.logger = logging.getLogger(__name__)
         
         # Statistics tracking
         self.stats = {
@@ -406,122 +397,55 @@ class GmailAPIClient:
         """
         operation_name = getattr(request_func, '__name__', 'unknown_operation')
         
-        # Use network interruption handler for robust API calls
-        with self.network_handler.handle_network_operation(
-            operation_name=operation_name,
-            context_data={'max_retries': self.rate_limit_config.max_retries}
-        ) as network_attempt:
-            
-            for attempt in range(self.rate_limit_config.max_retries + 1):
-                # Log API call attempt with timing
-                with self.api_logger.time_api_call("Gmail", operation_name, "gmail_api", attempt) as request_id:
-                    try:
-                        # Wait for rate limiting
-                        self.rate_limiter.wait_if_needed()
+        # Make API calls with retry logic
+        for attempt in range(self.rate_limit_config.max_retries + 1):
+            try:
+                # Wait for rate limiting
+                self.rate_limiter.wait_if_needed()
+                
+                # Make the request
+                response = request_func()
+                self.stats['total_requests'] += 1
+                self.stats['successful_requests'] += 1
+                
+                # Log successful API call
+                self.logger.info(f"Gmail API call successful: {operation_name}")
+                
+                return response
                         
-                        # Make the request
-                        response = request_func()
-                        self.stats['total_requests'] += 1
-                        self.stats['successful_requests'] += 1
-                        
-                        # Log successful API call
-                        self.api_logger.log_api_call(
-                            api_name="Gmail",
-                            method=operation_name,
-                            endpoint="gmail_api",
-                            status_code=200,
-                            retry_attempt=attempt,
-                            request_id=request_id
-                        )
-                        
-                        return response
-                        
-                    except HttpError as e:
-                        self.stats['total_requests'] += 1
-                        self.stats['failed_requests'] += 1
-                        
-                        # Check if it's a rate limit error (429 or 403 with rate limit message)
-                        is_rate_limit = (e.resp.status == 429 or 
-                                       (e.resp.status == 403 and 'rate' in str(e).lower()))
-                        
-                        if is_rate_limit:
-                            self.stats['rate_limit_hits'] += 1
-                            
-                            # Log rate limit hit
-                            self.api_logger.log_api_call(
-                                api_name="Gmail",
-                                method=operation_name,
-                                endpoint="gmail_api",
-                                status_code=e.resp.status,
-                                error=str(e),
-                                retry_attempt=attempt,
-                                rate_limited=True
-                            )
-                            
-                            if attempt < self.rate_limit_config.max_retries:
-                                delay = self.rate_limiter.handle_rate_limit_error(attempt)
-                                time.sleep(delay)
-                                continue
-                            else:
-                                self.error_logger.log_error(
-                                    error=e,
-                                    component="GmailAPIClient",
-                                    operation=operation_name,
-                                    context_data={
-                                        'attempt': attempt,
-                                        'status_code': e.resp.status,
-                                        'rate_limit_hits': self.stats['rate_limit_hits']
-                                    },
-                                    recovery_action="Wait longer before retrying or reduce request rate",
-                                    request_id=request_id
-                                )
-                                raise
-                        
-                        # For non-rate-limit errors, log and don't retry
-                        self.api_logger.log_api_call(
-                            api_name="Gmail",
-                            method=operation_name,
-                            endpoint="gmail_api",
-                            status_code=e.resp.status,
-                            error=str(e),
-                            retry_attempt=attempt
-                        )
-                        
-                        self.error_logger.log_error(
-                            error=e,
-                            component="GmailAPIClient",
-                            operation=operation_name,
-                            context_data={
-                                'status_code': e.resp.status,
-                                'attempt': attempt
-                            },
-                            recovery_action="Check API credentials and permissions",
-                            request_id=request_id
-                        )
-                        raise
+            except HttpError as e:
+                self.stats['total_requests'] += 1
+                self.stats['failed_requests'] += 1
+                
+                # Check if it's a rate limit error (429 or 403 with rate limit message)
+                is_rate_limit = (e.resp.status == 429 or 
+                               (e.resp.status == 403 and 'rate' in str(e).lower()))
+                
+                if is_rate_limit:
+                    self.stats['rate_limit_hits'] += 1
                     
-                    except Exception as e:
-                        self.stats['total_requests'] += 1
-                        self.stats['failed_requests'] += 1
-                        
-                        # Log unexpected error
-                        self.api_logger.log_api_call(
-                            api_name="Gmail",
-                            method=operation_name,
-                            endpoint="gmail_api",
-                            error=str(e),
-                            retry_attempt=attempt
-                        )
-                        
-                        self.error_logger.log_error(
-                            error=e,
-                            component="GmailAPIClient",
-                            operation=operation_name,
-                            context_data={'attempt': attempt},
-                            recovery_action="Check network connection and API configuration",
-                            request_id=request_id
-                        )
+                    # Log rate limit hit
+                    self.logger.warning(f"Gmail API rate limit hit: {operation_name}, attempt {attempt}")
+                    
+                    if attempt < self.rate_limit_config.max_retries:
+                        delay = self.rate_limiter.handle_rate_limit_error(attempt)
+                        time.sleep(delay)
+                        continue
+                    else:
+                        self.logger.error(f"Max retries exceeded for rate limit: {operation_name}")
                         raise
+                
+                # For non-rate-limit errors, log and don't retry
+                self.logger.error(f"Gmail API error: {operation_name}, status: {e.resp.status}, error: {str(e)}")
+                raise
+            
+            except Exception as e:
+                self.stats['total_requests'] += 1
+                self.stats['failed_requests'] += 1
+                
+                # Log unexpected error
+                self.logger.error(f"Gmail API unexpected error: {operation_name}, error: {str(e)}")
+                raise
     
     def get_stats(self) -> Dict[str, Any]:
         """Get client statistics.

@@ -45,12 +45,14 @@ class GmailDatasetCreator:
         self._dataset_builder = None
         
         # Process state management
-        from .utils.process_state import ProcessStateManager
-        from .utils.logging import get_progress_tracker, get_error_logger
-        
         self._process_manager = None
-        self.progress_tracker = get_progress_tracker(__name__)
-        self.error_logger = get_error_logger(__name__)
+        try:
+            from .utils.logging import get_progress_tracker, get_error_logger
+            self.progress_tracker = get_progress_tracker(__name__)
+            self.error_logger = get_error_logger(__name__)
+        except ImportError:
+            self.progress_tracker = None
+            self.error_logger = None
         
         # Setup logging with structured format and file output
         log_file = os.path.join(output_path or "./logs", "gmail_dataset_creator.log") if output_path else None
@@ -154,12 +156,17 @@ class GmailDatasetCreator:
         
         # Initialize process state manager
         process_id = f"dataset_creation_{int(datetime.now().timestamp())}"
-        self._process_manager = ProcessStateManager(
-            process_id=process_id,
-            checkpoint_dir=os.path.join(self.config.dataset.output_path, "checkpoints"),
-            checkpoint_interval=60,  # Checkpoint every minute
-            auto_save=True
-        )
+        try:
+            from .utils.process_state import ProcessStateManager
+            self._process_manager = ProcessStateManager(
+                process_id=process_id,
+                checkpoint_dir=os.path.join(self.config.dataset.output_path, "checkpoints"),
+                checkpoint_interval=60,  # Checkpoint every minute
+                auto_save=True
+            )
+        except ImportError:
+            self.logger.warning("ProcessStateManager not available, continuing without checkpoints")
+            self._process_manager = None
         
         # Register interruption handler
         def cleanup_on_interruption():
@@ -249,6 +256,7 @@ class GmailDatasetCreator:
         Returns:
             Dataset statistics
         """
+        from datetime import datetime
         start_time = datetime.now()
         emails_processed = []
         
@@ -256,32 +264,18 @@ class GmailDatasetCreator:
         with self._process_manager.stage_context("email_fetching"):
             self.logger.info("Stage 1: Fetching emails from Gmail...")
             
-            # Build query based on filters
-            query_parts = []
-            if self.config.filters.include_labels:
-                for label in self.config.filters.include_labels:
-                    query_parts.append(f"label:{label}")
-            
-            if self.config.filters.exclude_labels:
-                for label in self.config.filters.exclude_labels:
-                    query_parts.append(f"-label:{label}")
-            
-            if self.config.filters.date_range:
-                start_date, end_date = self.config.filters.date_range
-                query_parts.append(f"after:{start_date}")
-                query_parts.append(f"before:{end_date}")
-            
-            if self.config.filters.sender_filters:
-                for sender in self.config.filters.sender_filters:
-                    query_parts.append(f"from:{sender}")
-            
-            query = " ".join(query_parts) if query_parts else ""
-            
-            # Fetch emails from Gmail
-            raw_emails = self._gmail_client.fetch_emails(
-                query=query,
-                max_results=self.config.dataset.max_emails_total
+            # Fetch emails from Gmail with simple query
+            raw_emails = self._gmail_client.list_messages(
+                max_results=self.config.dataset.max_emails_total,
+                include_spam_trash=False
             )
+            
+            # Get full message content for each email
+            message_ids = [msg['id'] for msg in raw_emails.get('messages', [])]
+            if message_ids:
+                raw_emails = self._gmail_client.get_messages_batch(message_ids, format='full')
+            else:
+                raw_emails = []
             
             self.logger.info(f"Fetched {len(raw_emails)} emails from Gmail")
             self._process_manager.update_progress(
@@ -296,7 +290,7 @@ class GmailDatasetCreator:
             processed_emails = []
             for i, raw_email in enumerate(raw_emails):
                 try:
-                    email_data = self._email_processor.process_email(raw_email)
+                    email_data = self._email_processor.extract_content(raw_email)
                     if email_data:  # Only add if processing was successful
                         processed_emails.append(email_data)
                     
@@ -355,7 +349,7 @@ class GmailDatasetCreator:
             
             # Add classified emails to dataset builder
             for email_data, classification in classified_emails:
-                self._dataset_builder.add_email(email_data, classification.category)
+                self._dataset_builder.add_email(email_data, classification)
             
             # Check category distribution and warn about imbalances
             distribution = self._dataset_builder.get_category_distribution()
@@ -367,7 +361,7 @@ class GmailDatasetCreator:
                     )
             
             # Build and export datasets
-            stats = self._dataset_builder.build_datasets()
+            stats = self._dataset_builder.export_dataset()
             
             self.logger.info(f"Dataset export completed: {stats.total_emails} total emails")
             self._process_manager.update_progress(
@@ -443,39 +437,49 @@ class GmailDatasetCreator:
         self.logger.info("Initializing system components...")
         
         # Task 2: Authentication Handler
-        from .auth.authentication import AuthenticationHandler
-        self._auth_handler = AuthenticationHandler(
+        from .auth.authentication import AuthenticationHandler, AuthConfig
+        auth_config = AuthConfig(
             credentials_file=self.config.gmail_api.credentials_file,
             token_file=self.config.gmail_api.token_file,
             scopes=self.config.gmail_api.scopes
         )
+        self._auth_handler = AuthenticationHandler(auth_config)
         
         # Task 3: Gmail API Client
-        from .gmail.client import GmailAPIClient
-        self._gmail_client = GmailAPIClient(
-            auth_handler=self._auth_handler,
-            rate_limit_delay=1.0,
+        from .gmail.client import GmailAPIClient, RateLimitConfig, BatchConfig
+        rate_config = RateLimitConfig(
+            requests_per_second=10.0,
             max_retries=3,
-            batch_size=100
+            base_delay=1.0
+        )
+        batch_config = BatchConfig(batch_size=100)
+        
+        # Get credentials from auth handler
+        credentials = self._auth_handler.get_credentials()
+        if not credentials:
+            # Try to authenticate first
+            if not self._auth_handler.authenticate():
+                raise RuntimeError("Failed to authenticate with Gmail API")
+            credentials = self._auth_handler.get_credentials()
+        
+        self._gmail_client = GmailAPIClient(
+            credentials=credentials,
+            rate_limit_config=rate_config,
+            batch_config=batch_config
         )
         
         # Task 4: Email Processor
         from .processing.email_processor import EmailProcessor
         self._email_processor = EmailProcessor(
-            anonymize_senders=self.config.privacy.anonymize_senders,
-            anonymize_recipients=self.config.privacy.anonymize_recipients,
-            remove_sensitive_content=self.config.privacy.remove_sensitive_content,
-            exclude_keywords=self.config.privacy.exclude_keywords,
-            exclude_domains=self.config.privacy.exclude_domains
+            anonymize_content=self.config.privacy.anonymize_senders,
+            remove_sensitive=getattr(self.config.privacy, 'remove_sensitive_content', True)
         )
         
         # Task 5: Gemini Classifier
         from .processing.gemini_classifier import GeminiClassifier
         self._gemini_classifier = GeminiClassifier(
-            api_key=self.config.gemini_api.api_key,
-            model=self.config.gemini_api.model,
-            max_tokens=self.config.gemini_api.max_tokens,
-            confidence_threshold=self.config.privacy.min_confidence_threshold
+            config=self.config.gemini_api,
+            confidence_threshold=getattr(self.config.privacy, 'min_confidence_threshold', 0.7)
         )
         
         # Task 6: Dataset Builder

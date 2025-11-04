@@ -19,9 +19,7 @@ dataset:
   max_emails_total: 1000
 
 filters:
-  date_range:
-    start: "2023-01-01"
-    end: "2024-12-31"
+  date_range: ["2023-01-01", "2024-12-31"]
   exclude_labels:
     - "TRASH"
     - "SPAM"
