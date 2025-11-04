@@ -122,8 +122,9 @@ class TestAccuracyValidationSystem(unittest.TestCase):
         
         sampled = self.validation_system._sample_test_data(dataset)
         
-        # Should sample requested number or less
-        self.assertLessEqual(len(sampled), self.config.samples_per_test)
+        # Should sample requested number or less (use default of 100)
+        expected_samples = getattr(self.config, 'samples_per_test', 100)
+        self.assertLessEqual(len(sampled), expected_samples)
         
         # Should have representation from different categories
         sampled_categories = set(sample['category'] for sample in sampled)
@@ -140,7 +141,7 @@ class TestAccuracyValidationSystem(unittest.TestCase):
                 timestamp=datetime.now(),
                 dataset_path="test_dataset",
                 training_strategy="multi_phase",
-                model_config={"hidden_size": 256},
+                model_config={"hidden_size": 256, "num_layers": 2},
                 language="en",
                 training_result=None,
                 training_success=True,
@@ -173,9 +174,7 @@ class TestAccuracyValidationSystem(unittest.TestCase):
         self.assertIsNotNone(comprehensive_result.validation_summary)
         self.assertIsInstance(comprehensive_result.recommendations, list)
     
-    @patch('accuracy_validation_system.EmailTrainingOrchestrator')
-    @patch('accuracy_validation_system.EmailTokenizer')
-    def test_single_experiment_execution(self, mock_tokenizer, mock_orchestrator):
+    def test_single_experiment_execution(self):
         """Test single experiment execution with mocks."""
         # Mock the orchestrator
         mock_training_result = Mock()
@@ -184,49 +183,52 @@ class TestAccuracyValidationSystem(unittest.TestCase):
         mock_training_result.errors = []
         mock_training_result.warnings = []
         
-        mock_orchestrator_instance = Mock()
-        mock_orchestrator_instance.execute_training_pipeline.return_value = mock_training_result
-        mock_orchestrator.return_value = mock_orchestrator_instance
-        
-        # Mock model loading and evaluation
-        with patch.object(self.validation_system, '_load_trained_model') as mock_load_model, \
-             patch.object(self.validation_system, '_create_test_dataloader') as mock_create_loader, \
-             patch.object(self.validation_system.evaluator, 'evaluate_model') as mock_evaluate:
+        # Patch the orchestrator instance method directly
+        with patch.object(self.validation_system.orchestrator, 'execute_training_pipeline') as mock_execute:
+            mock_execute.return_value = mock_training_result
             
-            mock_model = Mock()
-            mock_load_model.return_value = mock_model
-            
-            mock_dataloader = Mock()
-            mock_create_loader.return_value = mock_dataloader
-            
-            mock_eval_result = Mock()
-            mock_eval_result.overall_accuracy = 0.96
-            mock_eval_result.category_metrics = {
-                "Newsletter": Mock(f1_score=0.95),
-                "Work": Mock(f1_score=0.97)
-            }
-            mock_eval_result.expected_calibration_error = 0.03
-            mock_eval_result.prediction_entropy = 0.2
-            mock_eval_result.inference_time_stats = {'mean_time_per_sample': 0.05}
-            mock_eval_result.throughput_metrics = {'samples_per_second': 20.0}
-            mock_evaluate.return_value = mock_eval_result
-            
-            # Execute experiment
-            exp_config = {
-                "dataset_path": "test_dataset",
-                "training_strategy": "multi_phase",
-                "model_config": {"hidden_size": 256},
-                "language": "en",
-                "experiment_name": "test_experiment"
-            }
-            
-            result = self.validation_system._execute_single_experiment(exp_config)
-            
-            # Verify result
-            self.assertTrue(result.training_success)
-            self.assertTrue(result.evaluation_success)
-            self.assertEqual(result.overall_accuracy, 0.96)
-            self.assertTrue(result.accuracy_target_met)  # 0.96 > 0.95
+            # Mock model loading and evaluation
+            with patch.object(self.validation_system, '_load_trained_model') as mock_load_model, \
+                 patch.object(self.validation_system, '_create_test_dataloader') as mock_create_loader, \
+                 patch.object(self.validation_system.evaluator, 'evaluate_model') as mock_evaluate, \
+                 patch('os.path.exists') as mock_exists:
+                
+                mock_exists.return_value = True  # Mock file exists
+                
+                mock_model = Mock()
+                mock_load_model.return_value = mock_model
+                
+                mock_dataloader = Mock()
+                mock_create_loader.return_value = mock_dataloader
+                
+                mock_eval_result = Mock()
+                mock_eval_result.overall_accuracy = 0.96
+                mock_eval_result.category_metrics = {
+                    "Newsletter": Mock(f1_score=0.95),
+                    "Work": Mock(f1_score=0.97)
+                }
+                mock_eval_result.expected_calibration_error = 0.03
+                mock_eval_result.prediction_entropy = 0.2
+                mock_eval_result.inference_time_stats = {'mean_time_per_sample': 0.05}
+                mock_eval_result.throughput_metrics = {'samples_per_second': 20.0}
+                mock_evaluate.return_value = mock_eval_result
+                
+                # Execute experiment
+                exp_config = {
+                    "dataset_path": "test_dataset",
+                    "training_strategy": "multi_phase",
+                    "model_config": {"hidden_size": 256, "num_layers": 2},
+                    "language": "en",
+                    "experiment_name": "test_experiment"
+                }
+                
+                result = self.validation_system._execute_single_experiment(exp_config)
+                
+                # Verify result
+                self.assertTrue(result.training_success)
+                self.assertTrue(result.evaluation_success)
+                self.assertEqual(result.overall_accuracy, 0.96)
+                self.assertTrue(result.accuracy_target_met)  # 0.96 > 0.95
 
 
 class TestRobustnessTestingSystem(unittest.TestCase):
@@ -456,7 +458,8 @@ class TestRobustnessTestingSystem(unittest.TestCase):
         }
         mock_batch1['labels'].cpu.return_value.numpy.return_value = np.array([0, 1])
         
-        mock_dataloader = [mock_batch1]
+        mock_dataloader = Mock()
+        mock_dataloader.__iter__ = Mock(return_value=iter([mock_batch1]))
         mock_dataloader.batch_size = 2
         
         # Mock torch functions

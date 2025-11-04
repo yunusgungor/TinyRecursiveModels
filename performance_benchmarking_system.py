@@ -802,8 +802,11 @@ Performance Benchmarking Summary for {target_name}:
         findings = []
         
         # Performance findings
-        best_comparison = max(comparisons, key=lambda x: x.overall_score)
-        findings.append(f"Best overall performance vs {best_comparison.baseline_name} (score: {best_comparison.overall_score:.3f})")
+        if comparisons:
+            best_comparison = max(comparisons, key=lambda x: x.overall_score)
+            findings.append(f"Best overall performance vs {best_comparison.baseline_name} (score: {best_comparison.overall_score:.3f})")
+        else:
+            findings.append("No baseline comparisons available")
         
         if target_metrics.accuracy >= 0.95:
             findings.append("✓ Achieved 95%+ accuracy target")
@@ -811,20 +814,26 @@ Performance Benchmarking Summary for {target_name}:
             findings.append(f"✗ Accuracy {target_metrics.accuracy:.1%} below 95% target")
         
         # Efficiency findings
-        fastest_baseline = min(baseline_metrics.items(), key=lambda x: x[1].inference_time_ms)
-        speed_vs_fastest = fastest_baseline[1].inference_time_ms / target_metrics.inference_time_ms
-        
-        if speed_vs_fastest > 0.8:
-            findings.append(f"Competitive inference speed (within 20% of fastest baseline)")
+        if baseline_metrics:
+            fastest_baseline = min(baseline_metrics.items(), key=lambda x: x[1].inference_time_ms)
+            speed_vs_fastest = fastest_baseline[1].inference_time_ms / target_metrics.inference_time_ms
+            
+            if speed_vs_fastest > 0.8:
+                findings.append(f"Competitive inference speed (within 20% of fastest baseline)")
+            else:
+                findings.append(f"Slower inference than fastest baseline ({fastest_baseline[0]})")
         else:
-            findings.append(f"Slower inference than fastest baseline ({fastest_baseline[0]})")
+            findings.append("No baseline metrics available for speed comparison")
         
         # Memory efficiency
-        most_efficient_baseline = min(baseline_metrics.items(), key=lambda x: x[1].memory_usage_mb)
-        if target_metrics.memory_usage_mb <= most_efficient_baseline[1].memory_usage_mb * 2:
-            findings.append("Reasonable memory usage compared to baselines")
+        if baseline_metrics:
+            most_efficient_baseline = min(baseline_metrics.items(), key=lambda x: x[1].memory_usage_mb)
+            if target_metrics.memory_usage_mb <= most_efficient_baseline[1].memory_usage_mb * 2:
+                findings.append("Reasonable memory usage compared to baselines")
+            else:
+                findings.append("High memory usage compared to baselines")
         else:
-            findings.append("High memory usage compared to baselines")
+            findings.append("No baseline metrics available for memory comparison")
         
         # Recommendations
         recommendations = []
@@ -838,9 +847,10 @@ Performance Benchmarking Summary for {target_name}:
         if target_metrics.memory_usage_mb > 500:  # 500MB threshold
             recommendations.append("Consider model compression or quantization to reduce memory usage")
         
-        worst_comparison = min(comparisons, key=lambda x: x.overall_score)
-        if worst_comparison.overall_score < 0.5:
-            recommendations.append(f"Significant performance gap vs {worst_comparison.baseline_name} - investigate model limitations")
+        if comparisons:
+            worst_comparison = min(comparisons, key=lambda x: x.overall_score)
+            if worst_comparison.overall_score < 0.5:
+                recommendations.append(f"Significant performance gap vs {worst_comparison.baseline_name} - investigate model limitations")
         
         # Resource efficiency analysis
         resource_analysis = {

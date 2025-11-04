@@ -299,6 +299,9 @@ class AccuracyValidationSystem:
     def _generate_experiment_configurations(self) -> List[Dict[str, Any]]:
         """Generate all experiment configurations to test."""
         
+        if not self.config.dataset_paths:
+            raise ValueError("No dataset paths provided for validation")
+        
         experiment_configs = []
         
         for dataset_path in self.config.dataset_paths:
@@ -541,6 +544,41 @@ class AccuracyValidationSystem:
             logger.error(f"Failed to create test dataloader: {e}")
             raise
     
+    def _sample_test_data(self, dataset: List[Dict]) -> List[Dict]:
+        """Sample test data for validation testing."""
+        from collections import defaultdict
+        import random
+        
+        if not dataset:
+            return []
+        
+        # Use samples_per_test from config if available, otherwise use a reasonable default
+        samples_per_test = getattr(self.config, 'samples_per_test', 100)
+        
+        # Ensure we have samples from each category
+        category_samples = defaultdict(list)
+        for sample in dataset:
+            category_samples[sample.get('category', 'unknown')].append(sample)
+        
+        # Sample evenly from each category
+        samples_per_category = max(1, samples_per_test // len(category_samples))
+        
+        selected_samples = []
+        for category, samples in category_samples.items():
+            if len(samples) >= samples_per_category:
+                selected = random.sample(samples, samples_per_category)
+            else:
+                selected = samples
+            selected_samples.extend(selected)
+        
+        # If we need more samples, randomly select additional ones
+        if len(selected_samples) < samples_per_test:
+            remaining_needed = samples_per_test - len(selected_samples)
+            additional_samples = random.sample(dataset, min(remaining_needed, len(dataset)))
+            selected_samples.extend(additional_samples)
+        
+        return selected_samples[:samples_per_test]
+    
     def _analyze_validation_results(self, start_time: float) -> ComprehensiveValidationResult:
         """Analyze all validation results and create comprehensive summary."""
         
@@ -716,7 +754,9 @@ class AccuracyValidationSystem:
         # Group by model configuration
         config_groups = {}
         for result in results:
-            config_key = f"h{result.model_config['hidden_size']}_l{result.model_config['num_layers']}"
+            hidden_size = result.model_config.get('hidden_size', 'unknown')
+            num_layers = result.model_config.get('num_layers', 'unknown')
+            config_key = f"h{hidden_size}_l{num_layers}"
             if config_key not in config_groups:
                 config_groups[config_key] = []
             config_groups[config_key].append(result)

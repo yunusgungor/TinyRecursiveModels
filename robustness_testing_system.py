@@ -580,6 +580,9 @@ class RobustnessTestingSystem:
     def _sample_test_data(self, dataset: List[Dict]) -> List[Dict]:
         """Sample test data for robustness testing."""
         
+        if not dataset:
+            return []
+        
         # Ensure we have samples from each category
         category_samples = defaultdict(list)
         for sample in dataset:
@@ -918,7 +921,17 @@ class RobustnessTestingSystem:
                 all_confidences.extend(confidences.cpu().numpy())
                 
                 # Track errors
-                errors = (predictions != labels).cpu().numpy()
+                if hasattr(predictions, 'cpu'):
+                    pred_numpy = predictions.cpu().numpy()
+                else:
+                    pred_numpy = predictions
+                
+                if hasattr(labels, 'cpu'):
+                    label_numpy = labels.cpu().numpy()
+                else:
+                    label_numpy = labels
+                
+                errors = (pred_numpy != label_numpy)
                 batch_start = batch_idx * dataloader.batch_size
                 error_indices.extend([batch_start + i for i, is_error in enumerate(errors) if is_error])
         
