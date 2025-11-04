@@ -45,8 +45,8 @@ class EmailDatasetConfig:
     max_emails_per_category: int = 10000
     
     # Email preprocessing
-    max_subject_length: int = 100
-    max_body_length: int = 1000
+    max_subject_length: int = 200
+    max_body_length: int = 10000
     min_body_length: int = 10
     
     # Validation parameters

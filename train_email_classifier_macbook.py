@@ -82,6 +82,31 @@ def validate_dataset_path(dataset_path: str) -> bool:
         print("    categories.json")
         return False
     
+    # Validate categories.json format (support both simple and gmail_dataset_creator formats)
+    categories_path = dataset_path / "categories.json"
+    try:
+        with open(categories_path, 'r') as f:
+            categories_data = json.load(f)
+        
+        # Check if it's gmail_dataset_creator format
+        if isinstance(categories_data, dict) and "categories" in categories_data:
+            # Gmail dataset creator format - extract the categories mapping
+            categories = categories_data["categories"]
+        else:
+            # Simple format
+            categories = categories_data
+        
+        # Validate that we have category mappings
+        if not isinstance(categories, dict) or not categories:
+            print(f"Error: Invalid categories format in {categories_path}")
+            return False
+            
+        print(f"Found {len(categories)} categories: {list(categories.keys())}")
+        
+    except Exception as e:
+        print(f"Error: Failed to read categories.json: {e}")
+        return False
+    
     return True
 
 
@@ -171,9 +196,16 @@ def create_sample_dataset(output_path: str) -> bool:
             json.dump(email, f)
             f.write('\n')
     
-    # Create categories file
+    # Create categories file (gmail_dataset_creator format)
+    category_info = {
+        "categories": categories,
+        "category_names": {v: k for k, v in categories.items()},
+        "total_categories": len(categories),
+        "description": "Email classification categories mapping"
+    }
+    
     with open(output_path / "categories.json", "w") as f:
-        json.dump(categories, f, indent=2)
+        json.dump(category_info, f, indent=2)
     
     # Create simple vocabulary
     vocab = {"<PAD>": 0, "<UNK>": 1, "<START>": 2, "<END>": 3}
@@ -261,6 +293,28 @@ def detect_hardware_and_recommend_config() -> Dict[str, Any]:
         }
 
 
+def load_categories_from_dataset(dataset_path: str) -> int:
+    """Load categories from dataset and return number of categories."""
+    categories_path = Path(dataset_path) / "categories.json"
+    
+    try:
+        with open(categories_path, 'r') as f:
+            categories_data = json.load(f)
+        
+        # Check if it's gmail_dataset_creator format
+        if isinstance(categories_data, dict) and "categories" in categories_data:
+            # Gmail dataset creator format - extract the categories mapping
+            categories = categories_data["categories"]
+        else:
+            # Simple format
+            categories = categories_data
+        
+        return len(categories)
+    except Exception as e:
+        print(f"Warning: Could not load categories from {categories_path}: {e}")
+        return 10  # Default to 10 categories
+
+
 def create_training_config(args: argparse.Namespace, 
                          hardware_recommendation: Dict[str, Any]) -> EmailTrainingConfig:
     """Create training configuration from arguments and hardware recommendation."""
@@ -291,13 +345,16 @@ def create_training_config(args: argparse.Namespace,
     if args.gradient_accumulation_steps:
         gradient_accumulation = args.gradient_accumulation_steps
     
+    # Load number of categories from dataset
+    num_categories = load_categories_from_dataset(args.dataset_path)
+    
     config = EmailTrainingConfig(
         # Model parameters
         model_name="EmailTRM",
         vocab_size=args.vocab_size,
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
-        num_email_categories=10,  # Fixed for email classification
+        num_email_categories=num_categories,
         
         # Training parameters
         batch_size=batch_size,

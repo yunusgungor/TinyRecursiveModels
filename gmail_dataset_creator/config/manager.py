@@ -24,7 +24,7 @@ class GmailAPIConfig:
 class GeminiAPIConfig:
     """Configuration for Gemini API access."""
     api_key: str = ""
-    model: str = "gemini-pro"
+    model: str = "gemini-2.0-flash"
     max_tokens: int = 1000
 
 
