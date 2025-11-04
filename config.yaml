@@ -1,0 +1,36 @@
+# Gmail Dataset Creator Configuration
+# This file contains all configuration options for the system
+
+gmail_api:
+  credentials_file: "credentials.json"
+  token_file: "token.json"
+  scopes:
+    - "https://www.googleapis.com/auth/gmail.readonly"
+
+gemini_api:
+  api_key: "${GEMINI_API_KEY}"  # Set via environment variable
+  model: "gemini-2.5-flash"
+  max_tokens: 1000
+
+dataset:
+  output_path: "./gmail_dataset"
+  train_ratio: 0.8
+  min_emails_per_category: 10
+  max_emails_total: 1000
+
+filters:
+  date_range:
+    start: "2023-01-01"
+    end: "2024-12-31"
+  exclude_labels:
+    - "TRASH"
+    - "SPAM"
+  include_labels:
+    - "INBOX"
+  sender_filters: []  # Optional: filter by specific senders
+
+privacy:
+  anonymize_senders: true
+  exclude_personal: false
+  remove_attachments: true
+  encrypt_tokens: true
