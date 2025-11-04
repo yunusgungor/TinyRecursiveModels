@@ -655,3 +655,68 @@ class ConfigurationValidator:
             ])
         
         return "\n".join(report_lines)
+
+
+@dataclass
+class EmailValidationResult:
+    """Email training configuration validation result."""
+    is_valid: bool
+    errors: List[str]
+    warnings: List[str]
+
+
+def validate_email_training_config(config) -> EmailValidationResult:
+    """
+    Validate email training configuration for MacBook hardware.
+    
+    Args:
+        config: EmailTrainingConfig object to validate
+        
+    Returns:
+        EmailValidationResult with validation status and messages
+    """
+    # Convert EmailTrainingConfig to dictionary for validation
+    config_dict = {}
+    
+    # Extract relevant configuration parameters
+    if hasattr(config, 'batch_size'):
+        config_dict['global_batch_size'] = config.batch_size
+    if hasattr(config, 'gradient_accumulation_steps'):
+        config_dict['gradient_accumulation_steps'] = config.gradient_accumulation_steps
+    if hasattr(config, 'learning_rate'):
+        config_dict['lr'] = config.learning_rate
+    if hasattr(config, 'memory_limit_mb'):
+        config_dict['memory_limit_mb'] = config.memory_limit_mb
+    if hasattr(config, 'num_workers'):
+        config_dict['num_workers'] = config.num_workers
+    if hasattr(config, 'max_sequence_length'):
+        config_dict['seq_len'] = config.max_sequence_length
+    if hasattr(config, 'hidden_size'):
+        config_dict['model_dim'] = config.hidden_size
+    if hasattr(config, 'num_layers'):
+        config_dict['num_layers'] = config.num_layers
+    
+    # Set device to CPU for MacBook training
+    config_dict['device'] = 'cpu'
+    config_dict['enable_mixed_precision'] = False
+    config_dict['pin_memory'] = False
+    
+    # Create validator and validate
+    validator = ConfigurationValidator()
+    validation_result = validator.validate_configuration(config_dict, auto_correct=False)
+    
+    # Convert ValidationResult to EmailValidationResult
+    errors = []
+    warnings = []
+    
+    for issue in validation_result.issues:
+        if issue.level in [ValidationLevel.CRITICAL, ValidationLevel.ERROR]:
+            errors.append(issue.message)
+        elif issue.level == ValidationLevel.WARNING:
+            warnings.append(issue.message)
+    
+    return EmailValidationResult(
+        is_valid=validation_result.is_valid,
+        errors=errors,
+        warnings=warnings
+    )

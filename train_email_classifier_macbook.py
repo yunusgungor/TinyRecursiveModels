@@ -90,18 +90,18 @@ def create_sample_dataset(output_path: str) -> bool:
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # Sample email categories
+    # Sample email categories (lowercase to match expected format)
     categories = {
-        "Newsletter": 0,
-        "Work": 1,
-        "Personal": 2,
-        "Spam": 3,
-        "Promotional": 4,
-        "Social": 5,
-        "Finance": 6,
-        "Travel": 7,
-        "Shopping": 8,
-        "Other": 9
+        "newsletter": 0,
+        "work": 1,
+        "personal": 2,
+        "spam": 3,
+        "promotional": 4,
+        "social": 5,
+        "finance": 6,
+        "travel": 7,
+        "shopping": 8,
+        "other": 9
     }
     
     # Sample emails
@@ -112,7 +112,7 @@ def create_sample_dataset(output_path: str) -> bool:
             "body": "Here are this week's top technology news and updates from our team.",
             "sender": "newsletter@techcompany.com",
             "recipient": "user@example.com",
-            "category": "Newsletter",
+            "category": "newsletter",
             "language": "en"
         },
         {
@@ -121,7 +121,7 @@ def create_sample_dataset(output_path: str) -> bool:
             "body": "Don't forget about our project meeting tomorrow at 2 PM in conference room A.",
             "sender": "manager@company.com",
             "recipient": "user@example.com",
-            "category": "Work",
+            "category": "work",
             "language": "en"
         },
         {
@@ -130,7 +130,7 @@ def create_sample_dataset(output_path: str) -> bool:
             "body": "Wishing you a very happy birthday! Hope you have a wonderful day.",
             "sender": "friend@personal.com",
             "recipient": "user@example.com",
-            "category": "Personal",
+            "category": "personal",
             "language": "en"
         },
         {
@@ -139,7 +139,7 @@ def create_sample_dataset(output_path: str) -> bool:
             "body": "Click here to claim your prize! Limited time offer!",
             "sender": "noreply@suspicious.com",
             "recipient": "user@example.com",
-            "category": "Spam",
+            "category": "spam",
             "language": "en"
         },
         {
@@ -148,24 +148,28 @@ def create_sample_dataset(output_path: str) -> bool:
             "body": "Don't miss our biggest sale of the year! 50% off all items.",
             "sender": "sales@retailstore.com",
             "recipient": "user@example.com",
-            "category": "Promotional",
+            "category": "promotional",
             "language": "en"
         }
     ]
     
-    # Create train dataset
+    # Create train dataset (JSONL format - one JSON object per line)
     train_dir = output_path / "train"
     train_dir.mkdir(exist_ok=True)
     
     with open(train_dir / "dataset.json", "w") as f:
-        json.dump(sample_emails, f, indent=2)
+        for email in sample_emails:
+            json.dump(email, f)
+            f.write('\n')
     
-    # Create test dataset (same as train for demo)
+    # Create test dataset (JSONL format - one JSON object per line)
     test_dir = output_path / "test"
     test_dir.mkdir(exist_ok=True)
     
     with open(test_dir / "dataset.json", "w") as f:
-        json.dump(sample_emails, f, indent=2)
+        for email in sample_emails:
+            json.dump(email, f)
+            f.write('\n')
     
     # Create categories file
     with open(output_path / "categories.json", "w") as f:
@@ -203,8 +207,10 @@ def detect_hardware_and_recommend_config() -> Dict[str, Any]:
         }
     
     try:
+        from macbook_optimization.training_config_adapter import TrainingConfigAdapter
         detector = HardwareDetector()
-        specs = detector.get_hardware_specs()
+        adapter = TrainingConfigAdapter(detector)
+        specs = adapter.get_hardware_specs()
         
         # Memory-based recommendations
         memory_gb = specs.memory.total_memory / (1024**3)
@@ -225,12 +231,16 @@ def detect_hardware_and_recommend_config() -> Dict[str, Any]:
             gradient_accumulation = 4
             max_steps = 10000
         
+        # Use available memory instead of total memory for limits
+        available_memory_gb = specs.memory.available_memory / (1024**3)
+        memory_limit_mb = int(available_memory_gb * 1024 * 0.8)  # Use 80% of available memory
+        
         recommendation = {
             "config_name": config_name,
             "hardware_specs": {
                 "cpu_cores": specs.cpu.cores,
                 "memory_gb": memory_gb,
-                "available_memory_gb": specs.memory.available_memory / (1024**3),
+                "available_memory_gb": available_memory_gb,
                 "platform": specs.platform.macos_version
             },
             "recommended_config": {
@@ -238,7 +248,7 @@ def detect_hardware_and_recommend_config() -> Dict[str, Any]:
                 "gradient_accumulation_steps": gradient_accumulation,
                 "max_steps": max_steps,
                 "learning_rate": 1e-4,
-                "memory_limit_mb": int(memory_gb * 1024 * 0.7)  # Use 70% of available memory
+                "memory_limit_mb": memory_limit_mb
             }
         }
         

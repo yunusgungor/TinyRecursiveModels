@@ -626,12 +626,16 @@ class EmailDatasetManager(DatasetManager):
         optimized_batch_size = min(batch_size, max_safe_batch_size, 16)  # Cap at 16 for emails
         
         # DataLoader configuration
+        # For small datasets, don't drop last batch to avoid empty dataloaders
+        dataset_size = len(dataset) if hasattr(dataset, '__len__') else 1000  # Default for streaming
+        drop_last = split == "train" and dataset_size > optimized_batch_size * 2  # Only drop if we have enough data
+        
         dataloader_config = {
             'batch_size': optimized_batch_size,
             'shuffle': split == "train",
             'num_workers': 0,  # Disable multiprocessing to avoid collate issues
             'pin_memory': False,  # Better for MacBook
-            'drop_last': split == "train"
+            'drop_last': drop_last
         }
         dataloader_config.update(kwargs)
         
