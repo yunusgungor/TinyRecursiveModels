@@ -9,14 +9,14 @@ gmail_api:
 
 gemini_api:
   api_key: "${GEMINI_API_KEY}"  # Set via environment variable
-  model: "gemini-2.5-flash"
+  model: "gemini-2.0-flash"
   max_tokens: 1000
 
 dataset:
   output_path: "./gmail_dataset"
   train_ratio: 0.8
-  min_emails_per_category: 10
-  max_emails_total: 1000
+  min_emails_per_category: 50
+  max_emails_total: 2000
 
 filters:
   date_range: ["2023-01-01", "2024-12-31"]

@@ -232,7 +232,7 @@ class ComprehensiveAccuracyValidator:
                 test_adversarial=True,
                 test_noise_robustness=not quick_mode,  # Skip in quick mode
                 test_length_variations=True,
-                samples_per_test=20 if quick_mode else 100,
+                samples_per_test=20 if quick_mode else 1000,
                 format_variations=["html", "plain_text"] if quick_mode else None,
                 adversarial_techniques=["typos"] if quick_mode else None,
                 output_dir=str(self.robustness_dir)

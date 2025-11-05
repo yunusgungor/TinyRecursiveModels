@@ -371,7 +371,7 @@ class EmailTrainingLoop:
     
     def train_step(self, batch: Dict[str, torch.Tensor]) -> EmailTrainingMetrics:
         """
-        Execute a single training step.
+        Execute a single training step with TRM recursive reasoning.
         
         Args:
             batch: Training batch dictionary
@@ -383,13 +383,64 @@ class EmailTrainingLoop:
         
         inputs = batch["input_ids"]
         labels = batch["labels"]
-        puzzle_identifiers = batch.get("puzzle_identifiers")
+        attention_mask = batch.get("attention_mask")
         
-        # Forward pass
-        outputs = self.model(inputs, labels=labels, puzzle_identifiers=puzzle_identifiers)
+        # TRM Recursive Reasoning Forward Pass
+        batch_size = inputs.size(0)
+        device = inputs.device
         
-        # Compute loss
-        loss = self._compute_email_loss(outputs, labels)
+        # Initialize carry state for recursive reasoning
+        carry = self.model.empty_carry(batch_size, device)
+        
+        # Create puzzle identifiers (email IDs)
+        puzzle_identifiers = torch.arange(batch_size, device=device)
+        
+        # Multi-cycle reasoning process
+        total_loss = 0.0
+        all_outputs = []
+        
+        for cycle in range(self.model.config.H_cycles):
+            # Forward pass for this reasoning cycle
+            cycle_outputs, halt_logits, carry = self.model.model(
+                inputs=inputs,
+                puzzle_identifiers=puzzle_identifiers,
+                carry=carry,
+                cycle=cycle
+            )
+            
+            # Add halt information to outputs
+            cycle_outputs["halt_logits"] = halt_logits
+            cycle_outputs["cycle"] = cycle
+            
+            all_outputs.append(cycle_outputs)
+            
+            # Compute cycle loss
+            cycle_loss = self._compute_email_loss(cycle_outputs, labels)
+            
+            # Weight loss by cycle (later cycles more important)
+            cycle_weight = (cycle + 1) / self.model.config.H_cycles
+            total_loss += cycle_weight * cycle_loss
+            
+            # Check halting decisions
+            halt_probs = torch.sigmoid(halt_logits[:, 1])  # Probability of halting
+            should_halt = halt_probs > 0.5
+            
+            # Update carry state for halted samples
+            carry.halted = carry.halted | should_halt
+            carry.steps += 1
+            
+            # If all samples have halted, break early
+            if carry.halted.all():
+                logger.debug(f"All samples halted at cycle {cycle}")
+                break
+        
+        # Use outputs from the last cycle for metrics
+        final_outputs = all_outputs[-1]
+        final_outputs["total_cycles"] = len(all_outputs)
+        final_outputs["avg_halt_cycle"] = carry.steps.float().mean().item()
+        
+        # Final loss is the accumulated loss
+        loss = total_loss / len(all_outputs)
         
         # Scale loss for gradient accumulation
         loss = loss / max(self.config.gradient_accumulation_steps, 1)  # Avoid division by zero
@@ -414,8 +465,8 @@ class EmailTrainingLoop:
             if self.lr_scheduler:
                 self.lr_scheduler.step()
         
-        # Compute metrics
-        metrics = self._compute_metrics(outputs, labels)
+        # Compute metrics using final outputs
+        metrics = self._compute_metrics(final_outputs, labels)
         
         # Update step counter
         self.current_step += 1
@@ -447,10 +498,32 @@ class EmailTrainingLoop:
             for batch in dataloader:
                 inputs = batch["input_ids"]
                 labels = batch["labels"]
-                puzzle_identifiers = batch.get("puzzle_identifiers")
                 
-                # Forward pass
-                outputs = self.model(inputs, labels=labels, puzzle_identifiers=puzzle_identifiers)
+                # TRM Recursive Reasoning Evaluation
+                batch_size = inputs.size(0)
+                device = inputs.device
+                
+                # Initialize carry state
+                carry = self.model.empty_carry(batch_size, device)
+                puzzle_identifiers = torch.arange(batch_size, device=device)
+                
+                # Multi-cycle reasoning for evaluation
+                for cycle in range(self.model.config.H_cycles):
+                    outputs, halt_logits, carry = self.model.model(
+                        inputs=inputs,
+                        puzzle_identifiers=puzzle_identifiers,
+                        carry=carry,
+                        cycle=cycle
+                    )
+                    
+                    # Check halting
+                    halt_probs = torch.sigmoid(halt_logits[:, 1])
+                    should_halt = halt_probs > 0.5
+                    carry.halted = carry.halted | should_halt
+                    carry.steps += 1
+                    
+                    if carry.halted.all():
+                        break
                 
                 # Accumulate loss
                 loss = self._compute_email_loss(outputs, labels)

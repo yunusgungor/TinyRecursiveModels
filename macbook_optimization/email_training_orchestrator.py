@@ -636,50 +636,48 @@ class EmailTrainingOrchestrator:
             # Initialize model
             logger.info("Initializing EmailTRM model...")
             
-            # For validation purposes, create a simple mock model
-            # This allows the validation pipeline to run without complex model configuration issues
-            import torch.nn as nn
+            # Use real MacBookEmailTRM with recursive reasoning
+            from .email_trm_integration import MacBookEmailTRM, MacBookEmailTRMConfig
             
-            class MockEmailClassifier(nn.Module):
-                def __init__(self, vocab_size, hidden_size, num_categories):
-                    super().__init__()
-                    self.embedding = nn.Embedding(vocab_size, hidden_size)
-                    self.transformer = nn.TransformerEncoder(
-                        nn.TransformerEncoderLayer(
-                            d_model=hidden_size,
-                            nhead=max(1, hidden_size // 64),
-                            batch_first=True
-                        ),
-                        num_layers=2
-                    )
-                    self.classifier = nn.Linear(hidden_size, num_categories)
-                    
-                def forward(self, input_ids, attention_mask=None, labels=None, puzzle_identifiers=None):
-                    x = self.embedding(input_ids)
-                    x = self.transformer(x)
-                    # Simple pooling
-                    x = x.mean(dim=1)
-                    logits = self.classifier(x)
-                    
-                    # Return dictionary format expected by training loop
-                    outputs = {
-                        'logits': logits,
-                        'last_hidden_state': x
-                    }
-                    
-                    # Calculate loss if labels provided
-                    if labels is not None:
-                        import torch.nn.functional as F
-                        loss = F.cross_entropy(logits, labels)
-                        outputs['loss'] = loss
-                    
-                    return outputs
-            
-            model = MockEmailClassifier(
+            # Create TRM config optimized for current hardware
+            trm_config = MacBookEmailTRMConfig(
+                # Base TRM parameters
+                batch_size=adapted_config.batch_size,
+                seq_len=adapted_config.max_sequence_length,
                 vocab_size=adapted_config.vocab_size,
                 hidden_size=adapted_config.hidden_size,
-                num_categories=adapted_config.num_email_categories
+                num_puzzle_identifiers=1,  # For email classification
+                
+                # TRM architecture parameters
+                L_layers=2,  # Reduced for memory efficiency
+                H_layers=2,  # Reduced for memory efficiency
+                H_cycles=2,  # Reduced for memory efficiency  
+                L_cycles=3,  # Reduced for memory efficiency
+                halt_max_steps=6,  # Reasonable halting limit
+                halt_exploration_prob=0.1,
+                
+                # Transformer parameters
+                num_heads=max(1, adapted_config.hidden_size // 64),
+                expansion=4.0,
+                pos_encodings="rope",
+                
+                # Email-specific parameters
+                num_email_categories=adapted_config.num_email_categories,
+                classification_dropout=0.1,
+                use_email_structure=True,
+                use_hierarchical_attention=True,
+                pooling_strategy='weighted',
+                
+                # MacBook optimizations
+                enable_cpu_optimization=True,
+                gradient_checkpointing=True,
+                dynamic_complexity=True,
+                memory_efficient_attention=True
             )
+            
+            model = MacBookEmailTRM(trm_config)
+            logger.info(f"MacBookEmailTRM initialized with {model._count_parameters():,} parameters")
+            logger.info("Using real TRM with recursive reasoning capabilities")
             
             # Create training phases
             phases = self.create_training_phases(strategy, total_steps, adapted_config)

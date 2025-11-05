@@ -552,8 +552,8 @@ class AccuracyValidationSystem:
         if not dataset:
             return []
         
-        # Use samples_per_test from config if available, otherwise use a reasonable default
-        samples_per_test = getattr(self.config, 'samples_per_test', 100)
+        # Use samples_per_test from config if available, otherwise use all available samples
+        samples_per_test = getattr(self.config, 'samples_per_test', len(dataset))
         
         # Ensure we have samples from each category
         category_samples = defaultdict(list)

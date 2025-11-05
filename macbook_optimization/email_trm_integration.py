@@ -31,7 +31,8 @@ from .training_config_adapter import TrainingConfigAdapter, HardwareSpecs
 try:
     from models.recursive_reasoning.trm_email import EmailTRM, EmailTRMConfig, create_email_trm_model
     EMAIL_TRM_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.error(f"Failed to import EmailTRM components: {e}")
     EmailTRM = None
     EmailTRMConfig = None
     create_email_trm_model = None
@@ -79,34 +80,8 @@ if EMAIL_TRM_AVAILABLE:
             self.memory_efficient_attention = config_dict.get('memory_efficient_attention', True)
 
 else:
-    class MacBookEmailTRMConfig:
-        """Mock MacBook EmailTRM configuration for testing when EmailTRM is not available."""
-        
-        def __init__(self, **kwargs):
-            # Set default values
-            defaults = {
-                'vocab_size': 5000,
-                'num_email_categories': 10,
-                'hidden_size': 256,
-                'L_layers': 2,
-                'H_cycles': 2,
-                'L_cycles': 3,
-                'halt_max_steps': 6,
-                'classification_dropout': 0.2,
-                'use_email_structure': True,
-                'use_hierarchical_attention': True,
-                'pooling_strategy': 'weighted',
-                'enable_cpu_optimization': True,
-                'use_mixed_precision': False,
-                'gradient_checkpointing': True,
-                'dynamic_complexity': True,
-                'memory_efficient_attention': True,
-            }
-            
-            # Apply defaults, then override with provided kwargs
-            config_dict = {**defaults, **kwargs}
-            for key, value in config_dict.items():
-                setattr(self, key, value)
+    def MacBookEmailTRMConfig(**kwargs):
+        raise ImportError("EmailTRM dependencies not available. Please install required packages.")
 
 
 if EMAIL_TRM_AVAILABLE and TORCH_AVAILABLE:
@@ -275,10 +250,14 @@ if EMAIL_TRM_AVAILABLE and TORCH_AVAILABLE:
             new_dropout = min(0.5, current_dropout + dropout_adjustment * 0.2)
             self.email_trm.model.lm_head.dropout.p = new_dropout
     
+    def empty_carry(self, batch_size: int, device: torch.device):
+        """Create empty carry state for recursive reasoning."""
+        return self.email_trm.empty_carry(batch_size, device)
+    
     def forward(self, inputs: torch.Tensor, labels: Optional[torch.Tensor] = None,
                 puzzle_identifiers: Optional[torch.Tensor] = None, **kwargs) -> Dict[str, torch.Tensor]:
         """
-        CPU-optimized forward pass with memory management.
+        CPU-optimized forward pass with TRM recursive reasoning and memory management.
         
         Args:
             inputs: Input token sequences [batch_size, seq_len]
@@ -287,7 +266,7 @@ if EMAIL_TRM_AVAILABLE and TORCH_AVAILABLE:
             **kwargs: Additional arguments
             
         Returns:
-            Dictionary with model outputs
+            Dictionary with model outputs including recursive reasoning results
         """
         if not TORCH_AVAILABLE:
             raise RuntimeError("PyTorch not available")
@@ -295,40 +274,99 @@ if EMAIL_TRM_AVAILABLE and TORCH_AVAILABLE:
         # Monitor memory before forward pass
         memory_before = self.memory_manager.monitor_memory_usage()
         
-        # Apply gradient checkpointing if enabled
-        if self.config.gradient_checkpointing and self.training:
-            # Use checkpoint for memory efficiency
-            outputs = torch.utils.checkpoint.checkpoint(
-                self._forward_impl,
-                inputs,
-                labels,
-                puzzle_identifiers,
-                **kwargs
-            )
-        else:
-            outputs = self._forward_impl(inputs, labels, puzzle_identifiers, **kwargs)
+        batch_size = inputs.size(0)
+        device = inputs.device
+        
+        # Create puzzle identifiers if not provided
+        if puzzle_identifiers is None:
+            puzzle_identifiers = torch.arange(batch_size, device=device)
+        
+        # Initialize carry state for recursive reasoning
+        carry = self.email_trm.empty_carry(batch_size, device)
+        
+        # TRM Recursive Reasoning Forward Pass
+        total_loss = 0.0
+        all_outputs = []
+        
+        # Multi-cycle reasoning process
+        for cycle in range(self.adjusted_config.H_cycles):
+            # Apply gradient checkpointing if enabled
+            if self.config.gradient_checkpointing and self.training:
+                # Use checkpoint for memory efficiency during training
+                cycle_outputs, halt_logits, carry = torch.utils.checkpoint.checkpoint(
+                    self.email_trm.model,
+                    inputs,
+                    puzzle_identifiers,
+                    carry,
+                    cycle,
+                    use_reentrant=False
+                )
+            else:
+                # Standard forward pass
+                cycle_outputs, halt_logits, carry = self.email_trm.model(
+                    inputs=inputs,
+                    puzzle_identifiers=puzzle_identifiers,
+                    carry=carry,
+                    cycle=cycle
+                )
+            
+            # Add cycle information to outputs
+            cycle_outputs["halt_logits"] = halt_logits
+            cycle_outputs["cycle"] = cycle
+            
+            all_outputs.append(cycle_outputs)
+            
+            # Compute cycle loss if labels provided
+            if labels is not None:
+                cycle_loss = self.email_trm._compute_enhanced_loss(cycle_outputs, labels)
+                
+                # Weight loss by cycle (later cycles more important)
+                cycle_weight = (cycle + 1) / self.adjusted_config.H_cycles
+                total_loss += cycle_weight * cycle_loss
+            
+            # Check halting decisions
+            halt_probs = torch.sigmoid(halt_logits[:, 1])  # Probability of halting
+            should_halt = halt_probs > 0.5
+            
+            # Update carry state for halted samples
+            carry.halted = carry.halted | should_halt
+            carry.steps += 1
+            
+            # If all samples have halted, break early
+            if carry.halted.all():
+                logger.debug(f"All samples halted at cycle {cycle}")
+                break
+        
+        # Use outputs from the last cycle as final outputs
+        final_outputs = all_outputs[-1]
+        
+        # Add recursive reasoning metadata
+        final_outputs.update({
+            "total_cycles": len(all_outputs),
+            "avg_halt_cycle": carry.steps.float().mean().item(),
+            "halt_efficiency": (carry.steps < self.adjusted_config.H_cycles).float().mean().item(),
+            "all_cycle_outputs": all_outputs if len(all_outputs) > 1 else None
+        })
+        
+        # Add loss if computed
+        if labels is not None:
+            final_outputs["loss"] = total_loss / len(all_outputs)
         
         # Monitor memory after forward pass
         memory_after = self.memory_manager.monitor_memory_usage()
-        
-        # Add memory usage info to outputs
-        outputs['memory_usage'] = {
-            'before_mb': memory_before.used_mb,
-            'after_mb': memory_after.used_mb,
-            'delta_mb': memory_after.used_mb - memory_before.used_mb,
-            'available_mb': memory_after.available_mb
+        final_outputs["memory_usage"] = {
+            "before_mb": memory_before.used_mb,
+            "after_mb": memory_after.used_mb,
+            "peak_mb": max(memory_before.used_mb, memory_after.used_mb)
         }
         
-        # Check for memory pressure and adjust if needed
+        # Dynamic complexity adjustment if memory pressure detected
         if memory_after.percent_used > 85:
-            self.adjust_complexity_dynamically(memory_after.used_mb * 0.9)
+            self.adjust_complexity_dynamically(memory_after.used_mb * 0.8)
         
-        return outputs
+        return final_outputs
     
-    def _forward_impl(self, inputs: torch.Tensor, labels: Optional[torch.Tensor] = None,
-                     puzzle_identifiers: Optional[torch.Tensor] = None, **kwargs) -> Dict[str, torch.Tensor]:
-        """Internal forward implementation."""
-        return self.email_trm(inputs, labels=labels, puzzle_identifiers=puzzle_identifiers, **kwargs)
+
     
     def predict(self, inputs: torch.Tensor, puzzle_identifiers: Optional[torch.Tensor] = None,
                 return_confidence: bool = False) -> torch.Tensor:
@@ -360,11 +398,17 @@ if EMAIL_TRM_AVAILABLE and TORCH_AVAILABLE:
                         chunk_inputs = inputs[i:i+16]
                         chunk_ids = puzzle_identifiers[i:i+16] if puzzle_identifiers is not None else None
                         
-                        chunk_result = self.email_trm.predict(
-                            chunk_inputs, 
-                            puzzle_identifiers=chunk_ids,
-                            return_confidence=return_confidence
-                        )
+                        # Use forward pass for chunks
+                        chunk_outputs = self.forward(chunk_inputs, puzzle_identifiers=chunk_ids)
+                        chunk_logits = chunk_outputs["logits"]
+                        chunk_preds = torch.argmax(chunk_logits, dim=-1)
+                        
+                        if return_confidence:
+                            chunk_probs = torch.softmax(chunk_logits, dim=-1)
+                            chunk_confs = torch.max(chunk_probs, dim=-1)[0]
+                            chunk_result = (chunk_preds, chunk_confs)
+                        else:
+                            chunk_result = chunk_preds
                         
                         if return_confidence:
                             chunk_preds, chunk_confs = chunk_result
@@ -381,12 +425,18 @@ if EMAIL_TRM_AVAILABLE and TORCH_AVAILABLE:
                     else:
                         return predictions
                 else:
-                    # Process normally
-                    return self.email_trm.predict(
-                        inputs,
-                        puzzle_identifiers=puzzle_identifiers,
-                        return_confidence=return_confidence
-                    )
+                    # Process normally using forward pass
+                    outputs = self.forward(inputs, puzzle_identifiers=puzzle_identifiers)
+                    logits = outputs["logits"]
+                    predictions = torch.argmax(logits, dim=-1)
+                    
+                    if return_confidence:
+                        # Calculate confidence as max probability
+                        probs = torch.softmax(logits, dim=-1)
+                        confidences = torch.max(probs, dim=-1)[0]
+                        return predictions, confidences
+                    else:
+                        return predictions
         finally:
             # Restore training mode
             if was_training:
@@ -440,110 +490,12 @@ if EMAIL_TRM_AVAILABLE and TORCH_AVAILABLE:
         }
 
 else:
-    class MacBookEmailTRM:
-        """Mock MacBook EmailTRM model for testing when dependencies are not available."""
-        
-        def __init__(self, config: MacBookEmailTRMConfig, hardware_specs: Optional[HardwareSpecs] = None):
-            self.config = config
-            self.hardware_specs = hardware_specs or self._create_mock_hardware_specs()
-            self.current_complexity_factor = 1.0
-            self.base_hidden_size = getattr(config, 'hidden_size', 256)
-            
-            # Mock email_trm attribute for compatibility with tests
-            self.email_trm = self
-            self.adjusted_config = config
-            
-        def _create_mock_hardware_specs(self):
-            """Create mock hardware specs for testing."""
-            from unittest.mock import Mock
-            mock_specs = Mock()
-            mock_specs.cpu.cores = 4
-            mock_specs.cpu.base_frequency = 2400.0
-            mock_specs.memory.total_memory = 8 * (1024**3)
-            mock_specs.memory.available_memory = 6 * (1024**3)
-            return mock_specs
-            
-        def _count_parameters(self) -> int:
-            return 1000000  # Mock parameter count
-            
-        def forward(self, inputs, labels=None, puzzle_identifiers=None, **kwargs):
-            if not TORCH_AVAILABLE:
-                raise RuntimeError("PyTorch not available")
-            
-            batch_size = inputs.size(0)
-            num_categories = getattr(self.config, 'num_email_categories', 10)
-            
-            # Create tensors that require gradients for proper training simulation
-            logits = torch.randn(batch_size, num_categories, requires_grad=True)
-            loss = torch.tensor(0.5, requires_grad=True)
-            
-            return {
-                "logits": logits,
-                "loss": loss,
-                "memory_usage": {
-                    "before_mb": 100.0,
-                    "after_mb": 120.0,
-                    "delta_mb": 20.0,
-                    "available_mb": 1000.0
-                }
-            }
-            
-        def __call__(self, *args, **kwargs):
-            """Make the mock model callable like a PyTorch module."""
-            return self.forward(*args, **kwargs)
-            
-        def predict(self, inputs, puzzle_identifiers=None, return_confidence=False):
-            if not TORCH_AVAILABLE:
-                raise RuntimeError("PyTorch not available")
-                
-            batch_size = inputs.size(0)
-            num_categories = getattr(self.config, 'num_email_categories', 10)
-            predictions = torch.randint(0, num_categories, (batch_size,))
-            
-            if return_confidence:
-                confidences = torch.rand(batch_size)
-                return predictions, confidences
-            return predictions
-            
-        def adjust_complexity_dynamically(self, target_memory_mb: float) -> bool:
-            # Mock adjustment - always return True
-            return True
-            
-        def get_memory_stats(self) -> Dict[str, Any]:
-            return {
-                'current_usage_mb': 100.0,
-                'current_usage_percent': 50.0,
-                'available_mb': 1000.0,
-                'model_parameters': self._count_parameters(),
-                'complexity_factor': self.current_complexity_factor,
-                'hardware_memory_gb': 8.0,
-                'recommendations': {}
-            }
-            
-        def get_performance_stats(self) -> Dict[str, Any]:
-            return {
-                'model_parameters': self._count_parameters(),
-                'complexity_factor': self.current_complexity_factor,
-                'cpu_cores': 4,
-                'cpu_frequency': 2400.0,
-                'memory_gb': 8.0,
-                'torch_threads': 4,
-                'mkl_enabled': True
-            }
-            
-        def train(self):
-            pass
-            
-        def eval(self):
-            pass
-            
-        def parameters(self):
-            """Mock parameters method for optimizer compatibility."""
-            if TORCH_AVAILABLE:
-                # Return a mock parameter for the optimizer
-                return [torch.nn.Parameter(torch.randn(10, 10))]
-            else:
-                return []
+    # If dependencies are not available, raise an error instead of using mock
+    def MacBookEmailTRM(*args, **kwargs):
+        raise ImportError("EmailTRM dependencies not available. Please install required packages.")
+    
+    def MacBookEmailTRMConfig(*args, **kwargs):
+        raise ImportError("EmailTRM dependencies not available. Please install required packages.")
 
 
 def create_macbook_email_trm(vocab_size: int, num_categories: int = 10,

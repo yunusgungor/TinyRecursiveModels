@@ -766,3 +766,23 @@ if __name__ == "__main__":
     print(f"Output logits shape: {outputs['logits'].shape}")
     print(f"Loss: {outputs['loss'].item():.4f}")
     print(f"Number of reasoning cycles: {outputs['num_cycles']}")
+
+def create_email_trm_model(vocab_size: int, num_categories: int = 10, **kwargs) -> EmailTRM:
+    """
+    Create EmailTRM model with specified configuration
+    
+    Args:
+        vocab_size: Vocabulary size
+        num_categories: Number of email categories
+        **kwargs: Additional configuration parameters
+        
+    Returns:
+        EmailTRM model instance
+    """
+    config = EmailTRMConfig(
+        vocab_size=vocab_size,
+        num_email_categories=num_categories,
+        **kwargs
+    )
+    
+    return EmailTRM(config)

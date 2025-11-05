@@ -15,16 +15,16 @@ def setup_environment():
     """Set up optimal environment variables for training."""
     
     # Fix OMP warnings by setting proper thread limits
-    os.environ["OMP_NUM_THREADS"] = "2"
-    os.environ["MKL_NUM_THREADS"] = "2" 
-    os.environ["NUMEXPR_NUM_THREADS"] = "2"
-    os.environ["OPENBLAS_NUM_THREADS"] = "2"
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1" 
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
     
     # Prevent fork warnings in multiprocessing
     os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
     
     # Set PyTorch threading
-    os.environ["TORCH_NUM_THREADS"] = "2"
+    os.environ["TORCH_NUM_THREADS"] = "1"
     
     print("Environment variables set:")
     print(f"  OMP_NUM_THREADS: {os.environ.get('OMP_NUM_THREADS')}")
@@ -38,16 +38,16 @@ def run_training_with_optimized_settings():
     cmd = [
         "python3", "./train_email_classifier_macbook.py",
         "--train",
-        "--dataset-path", "./enhanced_emails",
+        "--dataset-path", "./data/training_format",
         "--output-dir", "./training_output_optimized",
-        "--batch-size", "4",  # Slightly larger batch size for better learning
-        "--learning-rate", "5e-5",  # Lower learning rate for better convergence
-        "--max-steps", "2000",  # Reasonable number of steps for the dataset size
-        "--gradient-accumulation-steps", "4",  # Reduce memory pressure
-        "--max-sequence-length", "256",  # Reduce sequence length to save memory
-        "--hidden-size", "256",  # Smaller hidden size for memory efficiency
-        "--num-layers", "2",  # Keep layers reasonable
-        "--vocab-size", "500",  # Match our actual vocab size
+        "--batch-size", "8",  # Better batch size for 2000 samples
+        "--learning-rate", "1e-4",  # Good learning rate for transformer
+        "--max-steps", "5000",  # More steps for better learning
+        "--gradient-accumulation-steps", "2",  # Reduce memory pressure
+        "--max-sequence-length", "384",  # Better sequence length
+        "--hidden-size", "384",  # Better hidden size
+        "--num-layers", "3",  # More layers for better learning
+        "--vocab-size", "400",  # Match actual vocab size
         "--target-accuracy", "0.85",  # More realistic target
         "--early-stopping-patience", "10",  # More patience for small dataset
         "--strategy", "multi_phase",  # Use multi-phase training
@@ -79,14 +79,14 @@ def main():
     setup_environment()
     print()
     
-    # Check if enhanced dataset exists
-    if not Path("enhanced_emails").exists():
-        print("Enhanced dataset not found. Creating it first...")
+    # Check if expanded dataset exists
+    if not Path("data/training_format").exists():
+        print("Expanded dataset not found. Creating it first...")
         try:
-            subprocess.run(["python3", "create_enhanced_dataset.py"], check=True)
-            print("Enhanced dataset created successfully.")
+            subprocess.run(["python3", "convert_dataset_format.py"], check=True)
+            print("Expanded dataset created successfully.")
         except subprocess.CalledProcessError:
-            print("Failed to create enhanced dataset.")
+            print("Failed to create expanded dataset.")
             return 1
     
     # Run training

@@ -67,7 +67,7 @@ class RobustnessTestConfig:
     length_variations: List[str] = None  # ["very_short", "short", "medium", "long", "very_long"]
     
     # Testing parameters
-    samples_per_test: int = 100
+    samples_per_test: int = 1000
     confidence_threshold: float = 0.8
     performance_degradation_threshold: float = 0.1  # 10% max degradation
     

@@ -490,14 +490,12 @@ class EmailDatasetManager(DatasetManager):
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
             total_size_mb += file_size_mb
             
-            # Sample emails for analysis (first 1000 or 10% of file)
-            sample_size = min(1000, max(100, int(file_size_mb * 10)))
+            # Load all emails for analysis (no sampling limit)
+            sample_size = float('inf')  # No limit
             
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     for i, line in enumerate(f):
-                        if i >= sample_size:
-                            break
                         
                         try:
                             email_data = json.loads(line.strip())
