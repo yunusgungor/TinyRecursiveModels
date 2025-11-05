@@ -242,7 +242,7 @@ def detect_hardware_and_recommend_config() -> Dict[str, Any]:
         from macbook_optimization.training_config_adapter import TrainingConfigAdapter
         detector = HardwareDetector()
         adapter = TrainingConfigAdapter(detector)
-        specs = adapter.get_hardware_specs()
+        specs = adapter.get_hardware_summary()
         
         # Memory-based recommendations
         memory_gb = specs.memory.total_memory / (1024**3)

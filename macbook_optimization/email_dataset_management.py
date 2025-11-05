@@ -570,24 +570,51 @@ class EmailDatasetManager(DatasetManager):
         for file_path in email_files:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    for line_num, line in enumerate(f, 1):
-                        try:
-                            email_data = json.loads(line.strip())
-                            email = EmailSample.from_dict(email_data)
-                            
-                            # Remove duplicates
-                            if self.email_config.remove_duplicates:
-                                if email.id in seen_ids:
-                                    continue
-                                seen_ids.add(email.id)
-                            
-                            # Validate
-                            if self._validate_email_sample(email):
-                                emails.append(email)
-                        
-                        except json.JSONDecodeError:
-                            logger.warning(f"Invalid JSON in {file_path} at line {line_num}")
+                    content = f.read().strip()
+                
+                # First, try to parse as a single JSON object
+                try:
+                    email_data = json.loads(content)
+                    # If successful, it's a single JSON object
+                    email = EmailSample.from_dict(email_data)
+                    
+                    # Remove duplicates
+                    if self.email_config.remove_duplicates:
+                        if email.id in seen_ids:
                             continue
+                        seen_ids.add(email.id)
+                    
+                    # Validate
+                    if self._validate_email_sample(email):
+                        emails.append(email)
+                        
+                except json.JSONDecodeError:
+                    # If single JSON parsing fails, try JSONL format
+                    try:
+                        lines = content.split('\n')
+                        for line_num, line in enumerate(lines, 1):
+                            if not line.strip():
+                                continue
+                            try:
+                                email_data = json.loads(line.strip())
+                                email = EmailSample.from_dict(email_data)
+                                
+                                # Remove duplicates
+                                if self.email_config.remove_duplicates:
+                                    if email.id in seen_ids:
+                                        continue
+                                    seen_ids.add(email.id)
+                                
+                                # Validate
+                                if self._validate_email_sample(email):
+                                    emails.append(email)
+                                    
+                            except json.JSONDecodeError:
+                                logger.warning(f"Invalid JSON in {file_path} at line {line_num}")
+                                continue
+                                
+                    except Exception as e:
+                        logger.error(f"Failed to parse {file_path} as JSONL: {e}")
             
             except Exception as e:
                 logger.error(f"Error loading emails from {file_path}: {e}")

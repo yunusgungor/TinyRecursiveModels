@@ -27,7 +27,6 @@ from models.layers import rms_norm, SwiGLU, Attention, RotaryEmbedding, CosSin, 
 from models.sparse_embedding import CastedSparseEmbedding
 
 
-@dataclass
 class EmailTRMConfig(TinyRecursiveReasoningModel_ACTV1Config):
     """Configuration for Email Classification TRM"""
     

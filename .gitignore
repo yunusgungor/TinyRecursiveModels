@@ -163,3 +163,5 @@ checkpoints/
 credentials.json
 token.json
 token.key
+production-emails/
+training_format/
