@@ -38,6 +38,9 @@ class IntegratedEnhancedTrainer:
         # Initialize environment
         self.env = GiftRecommendationEnvironment("data/realistic_gift_catalog.json")
         
+        # Load and split scenarios for train/val
+        self._load_and_split_scenarios()
+        
         # Initialize optimizer with different learning rates for different components
         self.optimizer = self._create_optimizer()
         
@@ -57,10 +60,43 @@ class IntegratedEnhancedTrainer:
             'recommendation_quality': []
         }
         
+        # Early stopping
+        self.best_eval_score = 0.0
+        self.patience_counter = 0
+        self.early_stopping_patience = config.get('early_stopping_patience', 15)
+        
+        # Scenario storage
+        self.train_scenarios = []
+        self.val_scenarios = []
+        
         print(f"🚀 Integrated Enhanced Trainer initialized")
         print(f"📱 Device: {self.device}")
         print(f"🧠 Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        print(f"📊 Training scenarios: {len(self.train_scenarios)}")
+        print(f"📊 Validation scenarios: {len(self.val_scenarios)}")
         
+    def _load_and_split_scenarios(self):
+        """Load scenarios and split into train/validation sets"""
+        try:
+            with open("data/expanded_user_scenarios.json", "r") as f:
+                scenario_data = json.load(f)
+            all_scenarios = scenario_data["scenarios"]
+        except:
+            try:
+                with open("data/realistic_user_scenarios.json", "r") as f:
+                    scenario_data = json.load(f)
+                all_scenarios = scenario_data["scenarios"]
+            except:
+                all_scenarios = self._generate_fallback_scenarios()
+        
+        # Shuffle and split 80/20
+        np.random.shuffle(all_scenarios)
+        split_idx = int(len(all_scenarios) * 0.8)
+        self.train_scenarios = all_scenarios[:split_idx]
+        self.val_scenarios = all_scenarios[split_idx:]
+        
+        print(f"📊 Loaded {len(all_scenarios)} scenarios: {len(self.train_scenarios)} train, {len(self.val_scenarios)} val")
+    
     def _create_optimizer(self):
         """Create optimizer with different learning rates for different components"""
         # Group parameters by component
@@ -78,7 +114,7 @@ class IntegratedEnhancedTrainer:
                          [p for layer in self.model.semantic_matcher for p in layer.parameters()] +
                          list(self.model.category_attention.parameters()) +
                          list(self.model.category_scorer.parameters()),
-                'lr': self.config.get('category_matching_lr', 2e-4),
+                'lr': self.config.get('category_matching_lr', 4e-5),  # Much more reduced
                 'name': 'category_matching'
             },
             {
@@ -102,18 +138,22 @@ class IntegratedEnhancedTrainer:
             }
         ]
         
-        return optim.AdamW(param_groups, weight_decay=self.config.get('weight_decay', 0.01))
-    
-    def generate_training_batch(self, batch_size: int = 16) -> Tuple[List[UserProfile], List[List[GiftItem]], List[Dict]]:
-        """Generate a training batch with diverse user profiles and scenarios"""
+        optimizer = optim.AdamW(param_groups, weight_decay=self.config.get('weight_decay', 0.01))
         
-        # Load realistic user scenarios
-        try:
-            with open("data/realistic_user_scenarios.json", "r") as f:
-                scenario_data = json.load(f)
-            scenarios = scenario_data["scenarios"]
-        except:
-            # Fallback to generated scenarios
+        # Add learning rate scheduler with more aggressive reduction
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.3, patience=3, verbose=True, min_lr=1e-7
+        )
+        
+        return optimizer
+    
+    def generate_training_batch(self, batch_size: int = 16, use_validation: bool = False) -> Tuple[List[UserProfile], List[List[GiftItem]], List[Dict]]:
+        """Generate a training batch with diverse user profiles and scenarios with augmentation"""
+        
+        # Use appropriate scenario set
+        scenarios = self.val_scenarios if use_validation else self.train_scenarios
+        
+        if not scenarios:
             scenarios = self._generate_fallback_scenarios()
         
         batch_users = []
@@ -124,14 +164,33 @@ class IntegratedEnhancedTrainer:
             # Sample a scenario
             scenario = np.random.choice(scenarios)
             
-            # Create user profile
+            # Enhanced data augmentation with more aggressive variations
+            augmented_age = scenario["profile"]["age"] + np.random.randint(-7, 8)
+            augmented_age = max(18, min(75, augmented_age))  # Clamp to valid range
+            
+            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.7, 1.3)
+            augmented_budget = max(30.0, min(300.0, augmented_budget))  # Clamp to valid range
+            
+            # More aggressive hobby manipulation
+            hobbies = scenario["profile"]["hobbies"].copy()
+            if len(hobbies) > 2 and np.random.random() < 0.4:  # Increased probability
+                hobbies = hobbies[:max(1, len(hobbies)-1)]  # Drop at least one
+            np.random.shuffle(hobbies)
+            
+            # More aggressive preference manipulation
+            preferences = scenario["profile"]["preferences"].copy()
+            if np.random.random() < 0.3 and len(preferences) > 2:  # Increased probability
+                preferences = preferences[:max(1, len(preferences)-1)]  # Drop at least one
+            np.random.shuffle(preferences)
+            
+            # Create user profile with augmentation
             user = UserProfile(
-                age=scenario["profile"]["age"],
-                hobbies=scenario["profile"]["hobbies"],
+                age=int(augmented_age),
+                hobbies=hobbies,
                 relationship=scenario["profile"]["relationship"],
-                budget=scenario["profile"]["budget"],
+                budget=float(augmented_budget),
                 occasion=scenario["profile"]["occasion"],
-                personality_traits=scenario["profile"]["preferences"]
+                personality_traits=preferences
             )
             
             # Get available gifts
@@ -195,16 +254,20 @@ class IntegratedEnhancedTrainer:
         total_loss = torch.tensor(0.0, device=device)
         loss_components = {}
         
-        # 1. Category matching loss
+        # 1. Category matching loss with label smoothing
         category_targets = []
+        label_smoothing = 0.1  # Smooth labels to prevent overconfidence
+        
         for target in targets:
             expected_cats = target['expected_categories']
-            # Create target vector for expected categories
-            target_vector = torch.zeros(len(self.model.gift_categories), device=device)
+            # Create target vector with label smoothing
+            target_vector = torch.full((len(self.model.gift_categories),), 
+                                      label_smoothing / len(self.model.gift_categories), 
+                                      device=device)
             for cat in expected_cats:
                 if cat in self.model.gift_categories:
                     idx = self.model.gift_categories.index(cat)
-                    target_vector[idx] = 1.0
+                    target_vector[idx] = 1.0 - label_smoothing + (label_smoothing / len(self.model.gift_categories))
             category_targets.append(target_vector)
         
         if category_targets:
@@ -213,7 +276,7 @@ class IntegratedEnhancedTrainer:
             if category_scores.dim() == 3:
                 category_scores = category_scores.squeeze(1)
             category_loss = nn.BCELoss()(category_scores, category_target_tensor)
-            total_loss += self.config.get('category_loss_weight', 0.35) * category_loss
+            total_loss += self.config.get('category_loss_weight', 0.15) * category_loss  # Much more reduced
             loss_components['category_loss'] = category_loss.item()
         
         # 2. Tool diversity loss
@@ -234,16 +297,43 @@ class IntegratedEnhancedTrainer:
             if tool_scores.dim() == 3:
                 tool_scores = tool_scores.squeeze(1)
             tool_loss = nn.BCELoss()(tool_scores, tool_target_tensor)
-            total_loss += self.config.get('tool_diversity_loss_weight', 0.15) * tool_loss
+            total_loss += self.config.get('tool_diversity_loss_weight', 0.25) * tool_loss  # Increased from 0.15
             loss_components['tool_loss'] = tool_loss.item()
         
-        # 3. Reward prediction loss (simplified for now)
+        # 3. Enhanced reward prediction loss
         if predicted_rewards.numel() > 0:
-            # Simple reward loss - encourage higher rewards for better matches
-            target_reward = 0.7  # Target reward value
-            avg_predicted_reward = predicted_rewards.mean()
-            reward_loss = nn.MSELoss()(avg_predicted_reward, torch.tensor(target_reward, device=device))
-            total_loss += self.config.get('reward_loss_weight', 0.25) * reward_loss
+            # Calculate target rewards based on category and tool matches
+            target_rewards = []
+            for target in targets:
+                # Base reward from category match
+                expected_cats = set(target['expected_categories'])
+                base_reward = 0.5  # Base
+                
+                # Add bonus for budget appropriateness
+                budget = target['user_profile'].budget
+                if 50 <= budget <= 150:
+                    base_reward += 0.15
+                elif budget > 150:
+                    base_reward += 0.20
+                
+                # Add bonus for hobby diversity
+                num_hobbies = len(target['user_profile'].hobbies)
+                base_reward += min(0.15, num_hobbies * 0.05)
+                
+                # Clamp to reasonable range
+                base_reward = max(0.4, min(0.9, base_reward))
+                target_rewards.append(base_reward)
+            
+            target_reward_tensor = torch.tensor(target_rewards, device=device).unsqueeze(-1)
+            
+            # Expand to match predicted_rewards shape if needed
+            if predicted_rewards.dim() > 1 and predicted_rewards.size(-1) > 1:
+                avg_predicted_reward = predicted_rewards.mean(dim=-1, keepdim=True)
+            else:
+                avg_predicted_reward = predicted_rewards
+            
+            reward_loss = nn.MSELoss()(avg_predicted_reward, target_reward_tensor)
+            total_loss += self.config.get('reward_loss_weight', 0.40) * reward_loss
             loss_components['reward_loss'] = reward_loss.item()
         
         # 4. Semantic matching loss
@@ -314,7 +404,7 @@ class IntegratedEnhancedTrainer:
         return semantic_loss / len(targets) if targets else torch.tensor(0.0, device=device)
     
     def evaluate_model(self, num_eval_episodes: int = 50) -> Dict[str, float]:
-        """Evaluate the integrated enhanced model"""
+        """Evaluate the integrated enhanced model on validation set"""
         self.model.eval()
         
         eval_metrics = {
@@ -330,8 +420,8 @@ class IntegratedEnhancedTrainer:
         
         with torch.no_grad():
             for episode in range(num_eval_episodes):
-                # Generate evaluation batch
-                users, gifts, targets = self.generate_training_batch(batch_size=1)
+                # Generate evaluation batch from validation set
+                users, gifts, targets = self.generate_training_batch(batch_size=1, use_validation=True)
                 user = users[0]
                 target = targets[0]
                 
@@ -374,7 +464,7 @@ class IntegratedEnhancedTrainer:
         return eval_metrics
     
     def train_epoch(self, epoch: int, num_batches: int = 100) -> Dict[str, float]:
-        """Train one epoch"""
+        """Train one epoch with gradient accumulation"""
         self.model.train()
         
         epoch_losses = {
@@ -385,10 +475,14 @@ class IntegratedEnhancedTrainer:
             'semantic_loss': []
         }
         
+        accumulation_steps = 2  # Accumulate gradients over 2 batches
+        self.optimizer.zero_grad()
+        
         for batch_idx in range(num_batches):
             # Generate training batch
             users, gifts, targets = self.generate_training_batch(
-                batch_size=self.config.get('batch_size', 16)
+                batch_size=self.config.get('batch_size', 16),
+                use_validation=False
             )
             
             # Forward pass
@@ -416,19 +510,24 @@ class IntegratedEnhancedTrainer:
             # Compute loss
             loss, loss_components = self.compute_enhanced_loss(stacked_outputs, targets)
             
+            # Scale loss for gradient accumulation
+            loss = loss / accumulation_steps
+            
             # Backward pass
-            self.optimizer.zero_grad()
             loss.backward()
             
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            # Update weights every accumulation_steps
+            if (batch_idx + 1) % accumulation_steps == 0:
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                
+                self.optimizer.step()
+                self.optimizer.zero_grad()
             
-            self.optimizer.step()
-            
-            # Record losses
+            # Record losses (unscaled)
             for key, value in loss_components.items():
                 if key in epoch_losses:
-                    epoch_losses[key].append(value)
+                    epoch_losses[key].append(value * accumulation_steps)
             
             # Print progress
             if batch_idx % 20 == 0:
@@ -443,10 +542,9 @@ class IntegratedEnhancedTrainer:
         return epoch_metrics
     
     def train(self, num_epochs: int = 100, eval_frequency: int = 10):
-        """Main training loop"""
+        """Main training loop with early stopping and LR scheduling"""
         print(f"🚀 Starting training for {num_epochs} epochs")
-        
-        best_score = 0.0
+        print(f"📊 Early stopping patience: {self.early_stopping_patience} epochs")
         
         for epoch in range(num_epochs):
             print(f"\n📚 Epoch {epoch + 1}/{num_epochs}")
@@ -462,42 +560,65 @@ class IntegratedEnhancedTrainer:
             # Evaluate periodically
             if (epoch + 1) % eval_frequency == 0:
                 print("🔍 Evaluating model...")
-                eval_metrics = self.evaluate_model(num_eval_episodes=20)
+                eval_metrics = self.evaluate_model(num_eval_episodes=30)
                 
                 print(f"Evaluation - Category Match: {eval_metrics['category_match_rate']:.1%}, "
                       f"Tool Match: {eval_metrics['tool_match_rate']:.1%}, "
-                      f"Avg Reward: {eval_metrics['average_reward']:.3f}")
+                      f"Avg Reward: {eval_metrics['average_reward']:.3f}, "
+                      f"Quality: {eval_metrics['recommendation_quality']:.3f}")
                 
-                # Save best model
+                # Update learning rate scheduler
+                self.scheduler.step(train_metrics.get('total_loss', 0))
+                
+                # Check for improvement
                 current_score = eval_metrics['recommendation_quality']
-                if current_score > best_score:
-                    best_score = current_score
+                if current_score > self.best_eval_score:
+                    self.best_eval_score = current_score
+                    self.patience_counter = 0
                     self.save_model(f"integrated_enhanced_best.pt", epoch, eval_metrics)
                     print(f"💾 New best model saved! Score: {current_score:.3f}")
+                else:
+                    self.patience_counter += 1
+                    print(f"⏳ No improvement for {self.patience_counter} evaluation(s)")
+                
+                # Early stopping check
+                if self.patience_counter >= self.early_stopping_patience // eval_frequency:
+                    print(f"🛑 Early stopping triggered after {epoch + 1} epochs")
+                    print(f"🏆 Best score achieved: {self.best_eval_score:.3f}")
+                    break
             
             # Save checkpoint
             if (epoch + 1) % 25 == 0:
                 self.save_model(f"integrated_enhanced_epoch_{epoch + 1}.pt", epoch, train_metrics)
         
-        print(f"🎉 Training completed! Best score: {best_score:.3f}")
+        print(f"\n🎉 Training completed! Best score: {self.best_eval_score:.3f}")
     
     def save_model(self, filename: str, epoch: int, metrics: Dict[str, float]):
-        """Save model checkpoint"""
+        """Save model checkpoint with comprehensive information"""
         os.makedirs("checkpoints/integrated_enhanced", exist_ok=True)
         
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
             'config': self.config,
             'metrics': metrics,
+            'training_history': {
+                'best_score': self.best_eval_score,
+                'patience_counter': self.patience_counter,
+                'training_scenarios': len(self.train_scenarios),
+                'validation_scenarios': len(self.val_scenarios)
+            },
             'model_info': {
                 'total_parameters': sum(p.numel() for p in self.model.parameters()),
+                'trainable_parameters': sum(p.numel() for p in self.model.parameters() if p.requires_grad),
                 'enhanced_components': [
                     'user_profiling', 'category_matching', 'tool_selection', 
                     'reward_prediction', 'cross_modal_fusion'
                 ],
-                'training_date': datetime.now().isoformat()
+                'training_date': datetime.now().isoformat(),
+                'optimization_version': 'v2.0'
             }
         }
         
@@ -514,22 +635,23 @@ def main():
     # Create enhanced configuration
     config = create_integrated_enhanced_config()
     
-    # Add training-specific parameters
+    # Add training-specific parameters (optimized v3 - aggressive)
     config.update({
         'batch_size': 16,
         'num_epochs': 150,
-        'eval_frequency': 10,
-        'user_profile_lr': 2e-4,
-        'category_matching_lr': 3e-4,
-        'tool_selection_lr': 2e-4,
-        'reward_prediction_lr': 1.5e-4,
-        'main_lr': 1e-4,
-        'weight_decay': 0.01,
-        'category_loss_weight': 0.35,
-        'tool_diversity_loss_weight': 0.15,
-        'reward_loss_weight': 0.25,
-        'semantic_matching_loss_weight': 0.20,
-        'embedding_reg_weight': 1e-5
+        'eval_frequency': 5,  # More frequent evaluation
+        'early_stopping_patience': 25,  # Even more patience
+        'user_profile_lr': 5e-5,  # Further reduced
+        'category_matching_lr': 4e-5,  # Much more reduced (main problem)
+        'tool_selection_lr': 8e-5,  # Reduced
+        'reward_prediction_lr': 1.5e-4,  # INCREASED (needs to learn faster)
+        'main_lr': 5e-5,  # Further reduced
+        'weight_decay': 0.025,  # Much stronger regularization
+        'category_loss_weight': 0.15,  # Much more reduced (learning too fast)
+        'tool_diversity_loss_weight': 0.30,  # Keep same
+        'reward_loss_weight': 0.40,  # INCREASED (main problem - reward too low)
+        'semantic_matching_loss_weight': 0.15,  # Slightly reduced
+        'embedding_reg_weight': 3e-5  # Even stronger regularization
     })
     
     # Initialize trainer

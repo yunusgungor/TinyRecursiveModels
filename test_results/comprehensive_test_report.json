@@ -1,0 +1,305 @@
+{
+  "model_checkpoint": "finetuned_best.pt",
+  "test_date": "2025-11-12",
+  "num_scenarios": 10,
+  "overall_metrics": {
+    "category_match_rate": 0.8,
+    "avg_category_overlap": 0.3833333333333333,
+    "tool_match_rate": 1.0,
+    "avg_tool_overlap": 0.75,
+    "average_reward": 0.705426812171936,
+    "quality_score": 0.752713406085968
+  },
+  "category_distribution": {
+    "technology": 9,
+    "fitness": 8,
+    "experience": 6,
+    "cooking": 2,
+    "gardening": 2,
+    "books": 1,
+    "home": 2
+  },
+  "tool_distribution": {
+    "review_analysis": 10,
+    "price_comparison": 7,
+    "inventory_check": 3
+  },
+  "unique_categories_used": 7,
+  "total_categories": 13,
+  "detailed_results": [
+    {
+      "scenario_name": "Tech-savvy friend's birthday",
+      "category_match": true,
+      "category_match_pct": 0.5,
+      "tool_match": true,
+      "tool_match_pct": 1.0,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "technology",
+        "fitness",
+        "experience",
+        "books",
+        "home"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "price_comparison"
+      ],
+      "expected_categories": [
+        "technology",
+        "gaming"
+      ],
+      "expected_tools": [
+        "price_comparison",
+        "review_analysis"
+      ]
+    },
+    {
+      "scenario_name": "Gardening enthusiast mother",
+      "category_match": true,
+      "category_match_pct": 0.6666666666666666,
+      "tool_match": true,
+      "tool_match_pct": 1.0,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "cooking",
+        "gardening",
+        "experience",
+        "technology",
+        "fashion"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "inventory_check"
+      ],
+      "expected_categories": [
+        "cooking",
+        "books",
+        "gardening"
+      ],
+      "expected_tools": [
+        "review_analysis",
+        "inventory_check"
+      ]
+    },
+    {
+      "scenario_name": "Wellness-focused sister",
+      "category_match": true,
+      "category_match_pct": 0.5,
+      "tool_match": true,
+      "tool_match_pct": 0.5,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "technology",
+        "fitness",
+        "books",
+        "home",
+        "experience"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "price_comparison"
+      ],
+      "expected_categories": [
+        "fitness",
+        "wellness"
+      ],
+      "expected_tools": [
+        "review_analysis",
+        "budget_optimizer"
+      ]
+    },
+    {
+      "scenario_name": "Artistic friend",
+      "category_match": false,
+      "category_match_pct": 0.0,
+      "tool_match": true,
+      "tool_match_pct": 0.5,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "technology",
+        "fitness",
+        "home",
+        "experience",
+        "books"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "price_comparison"
+      ],
+      "expected_categories": [
+        "art",
+        "books"
+      ],
+      "expected_tools": [
+        "trend_analysis",
+        "review_analysis"
+      ]
+    },
+    {
+      "scenario_name": "Outdoor adventure father",
+      "category_match": true,
+      "category_match_pct": 0.5,
+      "tool_match": true,
+      "tool_match_pct": 1.0,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "technology",
+        "fitness",
+        "experience",
+        "home",
+        "books"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "price_comparison"
+      ],
+      "expected_categories": [
+        "fitness",
+        "outdoor"
+      ],
+      "expected_tools": [
+        "price_comparison",
+        "review_analysis"
+      ]
+    },
+    {
+      "scenario_name": "Foodie spouse",
+      "category_match": true,
+      "category_match_pct": 0.3333333333333333,
+      "tool_match": true,
+      "tool_match_pct": 0.5,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "cooking",
+        "gardening",
+        "technology",
+        "fitness",
+        "experience"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "inventory_check"
+      ],
+      "expected_categories": [
+        "cooking",
+        "experience",
+        "food"
+      ],
+      "expected_tools": [
+        "trend_analysis",
+        "review_analysis"
+      ]
+    },
+    {
+      "scenario_name": "Budget-conscious student",
+      "category_match": true,
+      "category_match_pct": 0.5,
+      "tool_match": true,
+      "tool_match_pct": 0.5,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "technology",
+        "fitness",
+        "home",
+        "books",
+        "experience"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "price_comparison"
+      ],
+      "expected_categories": [
+        "technology",
+        "books"
+      ],
+      "expected_tools": [
+        "price_comparison",
+        "budget_optimizer"
+      ]
+    },
+    {
+      "scenario_name": "Luxury gift for spouse",
+      "category_match": true,
+      "category_match_pct": 0.3333333333333333,
+      "tool_match": true,
+      "tool_match_pct": 0.5,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "technology",
+        "fitness",
+        "experience",
+        "home",
+        "books"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "price_comparison"
+      ],
+      "expected_categories": [
+        "food",
+        "wellness",
+        "experience"
+      ],
+      "expected_tools": [
+        "trend_analysis",
+        "review_analysis"
+      ]
+    },
+    {
+      "scenario_name": "Eco-conscious friend",
+      "category_match": false,
+      "category_match_pct": 0.0,
+      "tool_match": true,
+      "tool_match_pct": 1.0,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "technology",
+        "fitness",
+        "experience",
+        "books",
+        "home"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "inventory_check"
+      ],
+      "expected_categories": [
+        "wellness",
+        "gardening",
+        "outdoor"
+      ],
+      "expected_tools": [
+        "review_analysis",
+        "inventory_check"
+      ]
+    },
+    {
+      "scenario_name": "Gaming enthusiast",
+      "category_match": true,
+      "category_match_pct": 0.5,
+      "tool_match": true,
+      "tool_match_pct": 1.0,
+      "predicted_reward": 0.705426812171936,
+      "predicted_categories": [
+        "technology",
+        "fitness",
+        "experience",
+        "home",
+        "books"
+      ],
+      "selected_tools": [
+        "review_analysis",
+        "price_comparison"
+      ],
+      "expected_categories": [
+        "technology",
+        "gaming"
+      ],
+      "expected_tools": [
+        "price_comparison",
+        "review_analysis"
+      ]
+    }
+  ]
+}

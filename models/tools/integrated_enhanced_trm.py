@@ -136,7 +136,7 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         self.user_profile_encoder = nn.Sequential(
             nn.Linear(total_profile_dim, config.user_profile_encoding_dim),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(0.2),  # Increased from 0.1
             nn.Linear(config.user_profile_encoding_dim, config.user_profile_encoding_dim),
             nn.LayerNorm(config.user_profile_encoding_dim)
         )
@@ -157,7 +157,7 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
             nn.Sequential(
                 nn.Linear(config.category_embedding_dim, config.category_embedding_dim),
                 nn.ReLU(),
-                nn.Dropout(0.1)
+                nn.Dropout(0.2)  # Increased from 0.1
             ) for _ in range(config.semantic_matching_layers)
         ])
         
@@ -178,6 +178,7 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         self.category_scorer = nn.Sequential(
             nn.Linear(config.category_embedding_dim, config.category_embedding_dim // 2),
             nn.ReLU(),
+            nn.Dropout(0.3),  # Add dropout to slow down category learning
             nn.Linear(config.category_embedding_dim // 2, 1),
             nn.Sigmoid()
         )
@@ -287,7 +288,7 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         self.gift_feature_encoder = nn.Sequential(
             nn.Linear(config.gift_feature_dim, config.gift_embedding_dim),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(0.2),  # Increased from 0.1
             nn.Linear(config.gift_embedding_dim, config.gift_embedding_dim),
             nn.LayerNorm(config.gift_embedding_dim)
         )
@@ -319,7 +320,7 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         self.recommendation_head = nn.Sequential(
             nn.Linear(config.cross_modal_fusion_dim, config.cross_modal_fusion_dim // 2),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(0.5),  # Much stronger dropout
             nn.Linear(config.cross_modal_fusion_dim // 2, config.action_space_size),
             nn.Softmax(dim=-1)
         )
