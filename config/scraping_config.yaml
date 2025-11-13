@@ -1,9 +1,17 @@
 scraping:
   # Target websites
   websites:
+    - name: "cimri"
+      url: "https://www.cimri.com"
+      enabled: true
+      max_products: 1000
+      categories:
+        - "hediyelik-esya"
+      description: "Price comparison site - aggregates products from multiple stores"
+    
     - name: "ciceksepeti"
       url: "https://www.ciceksepeti.com"
-      enabled: true
+      enabled: false
       max_products: 500
       categories:
         - "hediye"
@@ -12,7 +20,7 @@ scraping:
     
     - name: "hepsiburada"
       url: "https://www.hepsiburada.com"
-      enabled: true
+      enabled: false
       max_products: 500
       categories:
         - "kitap"
@@ -21,7 +29,7 @@ scraping:
     
     - name: "trendyol"
       url: "https://www.trendyol.com"
-      enabled: true
+      enabled: false
       max_products: 500
       categories:
         - "ev-yasam"
@@ -53,7 +61,7 @@ scraping:
 # Gemini API
 gemini:
   api_key_env: "GEMINI_API_KEY"
-  model: "gemini-1.5-flash"
+  model: "gemini-2.0-flash"
   max_requests_per_day: 1000
   retry_attempts: 3
   retry_delay: 2  # seconds

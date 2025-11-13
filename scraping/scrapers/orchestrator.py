@@ -13,6 +13,7 @@ from ..utils.rate_limiter import RateLimiter
 from .ciceksepeti_scraper import CicekSepetiScraper
 from .hepsiburada_scraper import HepsiburadaScraper
 from .trendyol_scraper import TrendyolScraper
+from .cimri_scraper import CimriScraper
 
 
 class ScrapingOrchestrator:
@@ -82,6 +83,7 @@ class ScrapingOrchestrator:
             Scraper instance or None
         """
         scraper_map = {
+            'cimri': CimriScraper,
             'ciceksepeti': CicekSepetiScraper,
             'hepsiburada': HepsiburadaScraper,
             'trendyol': TrendyolScraper

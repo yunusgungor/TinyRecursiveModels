@@ -107,15 +107,18 @@ class AntiBotHelper:
         Returns:
             True if CAPTCHA detected, False otherwise
         """
+        # More specific CAPTCHA detection patterns
         captcha_keywords = [
-            'captcha',
+            'g-recaptcha',
             'recaptcha',
             'hcaptcha',
-            'bot detection',
+            'cf-challenge',
+            'cloudflare',
             'verify you are human',
-            'robot',
+            'i am not a robot',
             'güvenlik doğrulaması',
-            'robot değilim'
+            'robot değilim',
+            'captcha-box'
         ]
         
         page_lower = page_content.lower()

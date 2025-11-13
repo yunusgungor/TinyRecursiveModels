@@ -32,6 +32,7 @@ class BaseScraper(ABC):
         self.browser_config = config.get('browser', {})
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
+        self.playwright = None
         
         # Anti-bot helper
         user_agents = self.browser_config.get('user_agents', [])
@@ -48,14 +49,24 @@ class BaseScraper(ABC):
 
     async def setup_browser(self) -> None:
         """Initialize Playwright browser"""
+        if self.browser and self.context:
+            self.logger.info("Browser already set up")
+            return
+            
         self.logger.info("Setting up browser...")
         
-        playwright = await async_playwright().start()
+        self.playwright = await async_playwright().start()
         
-        # Launch browser
-        self.browser = await playwright.chromium.launch(
-            headless=self.browser_config.get('headless', True)
-        )
+        # Launch browser - use webkit on macOS to avoid Chromium crashes
+        import platform
+        if platform.system() == 'Darwin':  # macOS
+            self.browser = await self.playwright.webkit.launch(
+                headless=self.browser_config.get('headless', True)
+            )
+        else:
+            self.browser = await self.playwright.chromium.launch(
+                headless=self.browser_config.get('headless', True)
+            )
         
         # Create context with anti-bot settings
         viewport = self.browser_config.get('viewport', {'width': 1920, 'height': 1080})
@@ -79,8 +90,13 @@ class BaseScraper(ABC):
         """Close browser and cleanup"""
         if self.context:
             await self.context.close()
+            self.context = None
         if self.browser:
             await self.browser.close()
+            self.browser = None
+        if self.playwright:
+            await self.playwright.stop()
+            self.playwright = None
         self.logger.info("Browser closed")
     
     async def create_page(self) -> Page:
@@ -104,7 +120,7 @@ class BaseScraper(ABC):
         async with self.rate_limiter:
             pass
     
-    async def safe_goto(self, page: Page, url: str, wait_until: str = 'networkidle') -> bool:
+    async def safe_goto(self, page: Page, url: str, wait_until: str = 'domcontentloaded') -> bool:
         """
         Safely navigate to URL with error handling
         
