@@ -1,0 +1,87 @@
+scraping:
+  # Target websites
+  websites:
+    - name: "ciceksepeti"
+      url: "https://www.ciceksepeti.com"
+      enabled: true
+      max_products: 500
+      categories:
+        - "hediye"
+        - "cicek"
+        - "aksesuar"
+    
+    - name: "hepsiburada"
+      url: "https://www.hepsiburada.com"
+      enabled: true
+      max_products: 500
+      categories:
+        - "kitap"
+        - "elektronik"
+        - "ev-yasam"
+    
+    - name: "trendyol"
+      url: "https://www.trendyol.com"
+      enabled: true
+      max_products: 500
+      categories:
+        - "ev-yasam"
+        - "kitap"
+        - "spor-outdoor"
+
+  # Rate limiting
+  rate_limit:
+    requests_per_minute: 20
+    delay_between_requests: [2, 5]  # Random delay in seconds
+    max_concurrent_requests: 10
+    
+  # Browser settings
+  browser:
+    headless: true
+    user_agents:
+      - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    viewport:
+      width: 1920
+      height: 1080
+    timeout: 30000  # milliseconds
+    
+  # Test mode
+  test_mode: false
+  test_products_limit: 10
+
+# Gemini API
+gemini:
+  api_key_env: "GEMINI_API_KEY"
+  model: "gemini-1.5-flash"
+  max_requests_per_day: 1000
+  retry_attempts: 3
+  retry_delay: 2  # seconds
+  timeout: 30
+  
+  # Enhancement prompts
+  enhancement_prompt: |
+    Analyze this product and provide structured information:
+    Product Name: {name}
+    Description: {description}
+    Price: {price} TL
+    
+    Return JSON with:
+    - category: main category (technology, books, cooking, art, wellness, fitness, outdoor, home, food, experience, gaming, fashion, gardening)
+    - target_audience: list of target demographics
+    - gift_occasions: suitable occasions (birthday, mothers_day, fathers_day, christmas, etc.)
+    - emotional_tags: emotional attributes (relaxing, exciting, practical, luxury, etc.)
+    - age_range: [min_age, max_age]
+
+# Output
+output:
+  raw_data_path: "data/scraped_raw"
+  processed_data_path: "data/scraped_processed"
+  final_dataset_path: "data/scraped_gift_catalog.json"
+  
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/scraping.log"
+  error_file: "logs/scraping_errors.log"
+  verbose: false

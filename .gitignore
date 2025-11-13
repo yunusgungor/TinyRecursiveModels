@@ -129,6 +129,7 @@ dmypy.json
 .pyre/
 
 data/
+data-backup/
 test_checkpoints/
 test_data/
 checkpoints/
