@@ -176,6 +176,9 @@ class IntegratedEnhancedTrainer:
         self.train_scenarios = []
         self.val_scenarios = []
         
+        # Load scenarios BEFORE printing
+        self._load_and_split_scenarios()
+        
         print(f"🚀 Integrated Enhanced Trainer initialized")
         print(f"📱 Device: {self.device}")
         print(f"🧠 Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
@@ -254,9 +257,9 @@ class IntegratedEnhancedTrainer:
         
         optimizer = optim.AdamW(param_groups, weight_decay=self.config.get('weight_decay', 0.01))
         
-        # Add learning rate scheduler with more aggressive reduction
+        # Add learning rate scheduler with moderate reduction
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.3, patience=3, verbose=True, min_lr=1e-7
+            optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-6, verbose=True
         )
         
         return optimizer
@@ -278,22 +281,22 @@ class IntegratedEnhancedTrainer:
             # Sample a scenario
             scenario = np.random.choice(scenarios)
             
-            # Enhanced data augmentation with more aggressive variations
-            augmented_age = scenario["profile"]["age"] + np.random.randint(-7, 8)
+            # Moderate data augmentation (reduced from aggressive)
+            augmented_age = scenario["profile"]["age"] + np.random.randint(-3, 4)
             augmented_age = max(18, min(75, augmented_age))  # Clamp to valid range
             
-            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.7, 1.3)
+            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.85, 1.15)
             augmented_budget = max(30.0, min(300.0, augmented_budget))  # Clamp to valid range
             
-            # More aggressive hobby manipulation
+            # Moderate hobby manipulation
             hobbies = scenario["profile"]["hobbies"].copy()
-            if len(hobbies) > 2 and np.random.random() < 0.4:  # Increased probability
+            if len(hobbies) > 2 and np.random.random() < 0.2:  # Reduced probability
                 hobbies = hobbies[:max(1, len(hobbies)-1)]  # Drop at least one
             np.random.shuffle(hobbies)
             
-            # More aggressive preference manipulation
+            # Moderate preference manipulation
             preferences = scenario["profile"]["preferences"].copy()
-            if np.random.random() < 0.3 and len(preferences) > 2:  # Increased probability
+            if np.random.random() < 0.15 and len(preferences) > 2:  # Reduced probability
                 preferences = preferences[:max(1, len(preferences)-1)]  # Drop at least one
             np.random.shuffle(preferences)
             
@@ -442,13 +445,43 @@ class IntegratedEnhancedTrainer:
                 base_reward = max(0.4, min(1.0, base_reward))
                 target_rewards.append(base_reward)
             
-            target_reward_tensor = torch.tensor(target_rewards, device=device).unsqueeze(-1)
+            target_reward_tensor = torch.tensor(target_rewards, device=device)
             
-            # Expand to match predicted_rewards shape if needed
-            if predicted_rewards.dim() > 1 and predicted_rewards.size(-1) > 1:
-                avg_predicted_reward = predicted_rewards.mean(dim=-1, keepdim=True)
-            else:
+            # Fix shape mismatch - predicted_rewards can be [batch, num_gifts] or [batch, 1] or [batch]
+            # We need to reduce it to [batch] to match target
+            
+            # Debug: Print shapes to understand the issue
+            # print(f"DEBUG: predicted_rewards shape: {predicted_rewards.shape}, target shape: {target_reward_tensor.shape}")
+            
+            if predicted_rewards.dim() == 3:
+                # [batch, 1, 1] -> [batch]
+                avg_predicted_reward = predicted_rewards.squeeze(-1).squeeze(-1)
+            elif predicted_rewards.dim() == 2:
+                # [batch, num_gifts] or [batch, 1] -> [batch]
+                if predicted_rewards.size(-1) > 1:
+                    # Multiple predictions per sample (e.g., per gift), take mean across gifts
+                    avg_predicted_reward = predicted_rewards.mean(dim=-1)
+                else:
+                    # Single prediction per sample, just squeeze
+                    avg_predicted_reward = predicted_rewards.squeeze(-1)
+            elif predicted_rewards.dim() == 1:
+                # Already [batch]
                 avg_predicted_reward = predicted_rewards
+            else:
+                # Fallback: flatten to 1D
+                avg_predicted_reward = predicted_rewards.view(-1)
+            
+            # Ensure both are 1D tensors [batch]
+            if target_reward_tensor.dim() > 1:
+                target_reward_tensor = target_reward_tensor.view(-1)
+            if avg_predicted_reward.dim() > 1:
+                avg_predicted_reward = avg_predicted_reward.view(-1)
+            
+            # Final safety check: ensure same size
+            if avg_predicted_reward.size(0) != target_reward_tensor.size(0):
+                # If sizes don't match, take first batch_size elements
+                batch_size = target_reward_tensor.size(0)
+                avg_predicted_reward = avg_predicted_reward[:batch_size]
             
             reward_loss = nn.MSELoss()(avg_predicted_reward, target_reward_tensor)
             total_loss += self.config.get('reward_loss_weight', 0.40) * reward_loss
@@ -591,9 +624,10 @@ class IntegratedEnhancedTrainer:
                 for tool_name in selected_tools:
                     try:
                         if tool_name == 'price_comparison':
-                            result = self.model.tool_registry.execute_tool(
+                            tool_call = self.model.tool_registry.call_tool_by_name(
                                 'price_comparison', gifts=self.env.gift_catalog, budget=user.budget
                             )
+                            result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             if result and len(result.get('in_budget', [])) > 0:
                                 tool_execution_reward += 0.2
@@ -602,9 +636,10 @@ class IntegratedEnhancedTrainer:
                                 tool_execution_reward -= 0.1
                         
                         elif tool_name == 'review_analysis':
-                            result = self.model.tool_registry.execute_tool(
+                            tool_call = self.model.tool_registry.call_tool_by_name(
                                 'review_analysis', gifts=self.env.gift_catalog
                             )
+                            result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             if result and result.get('average_rating', 0) > 4.0:
                                 tool_execution_reward += 0.15
@@ -613,9 +648,10 @@ class IntegratedEnhancedTrainer:
                                 tool_execution_reward -= 0.1
                         
                         elif tool_name == 'inventory_check':
-                            result = self.model.tool_registry.execute_tool(
+                            tool_call = self.model.tool_registry.call_tool_by_name(
                                 'inventory_check', gifts=self.env.gift_catalog
                             )
+                            result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             if result and len(result.get('available', [])) > 0:
                                 tool_execution_reward += 0.1
@@ -624,9 +660,10 @@ class IntegratedEnhancedTrainer:
                                 tool_execution_reward -= 0.1
                         
                         elif tool_name == 'trend_analyzer':
-                            result = self.model.tool_registry.execute_tool(
+                            tool_call = self.model.tool_registry.call_tool_by_name(
                                 'trend_analyzer', gifts=self.env.gift_catalog, user_age=user.age
                             )
+                            result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             if result and len(result.get('trending', [])) > 0:
                                 tool_execution_reward += 0.15
@@ -755,11 +792,12 @@ class IntegratedEnhancedTrainer:
                                 budget = tool_params_dict[tool_name]['budget']
                             else:
                                 budget = user.budget
-                            result = self.model.tool_registry.execute_tool(
+                            tool_call = self.model.tool_registry.call_tool_by_name(
                                 'price_comparison',
                                 gifts=self.env.gift_catalog,
                                 budget=budget
                             )
+                            result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             tool_context['price_info'] = result
                             
@@ -785,10 +823,11 @@ class IntegratedEnhancedTrainer:
                                     in_budget_ids = [item.id if hasattr(item, 'id') else item['id'] for item in in_budget_items]
                                     gifts_to_analyze = [g for g in self.env.gift_catalog if g.id in in_budget_ids]
                             
-                            result = self.model.tool_registry.execute_tool(
+                            tool_call = self.model.tool_registry.call_tool_by_name(
                                 'review_analysis',
                                 gifts=gifts_to_analyze
                             )
+                            result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             tool_context['review_info'] = result
                             
@@ -804,10 +843,11 @@ class IntegratedEnhancedTrainer:
                                 tool_execution_reward -= 0.1
                         
                         elif tool_name == 'inventory_check':
-                            result = self.model.tool_registry.execute_tool(
+                            tool_call = self.model.tool_registry.call_tool_by_name(
                                 'inventory_check',
                                 gifts=self.env.gift_catalog
                             )
+                            result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             tool_context['inventory_info'] = result
                             
@@ -823,11 +863,12 @@ class IntegratedEnhancedTrainer:
                                 tool_execution_reward -= 0.1
                         
                         elif tool_name == 'trend_analyzer':
-                            result = self.model.tool_registry.execute_tool(
+                            tool_call = self.model.tool_registry.call_tool_by_name(
                                 'trend_analyzer',
                                 gifts=self.env.gift_catalog,
                                 user_age=user.age
                             )
+                            result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             tool_context['trend_info'] = result
                             
@@ -856,15 +897,12 @@ class IntegratedEnhancedTrainer:
                         # Bonus for successful multi-tool usage
                         tool_execution_reward += 0.1 * (len(successful_tools) - 1)
                 
-                # Encode tool results and add to carry state
+                # Encode tool results for future use
+                # Note: Tool feedback integration with carry state is prepared for future enhancement
                 if tool_results:
                     encoded_tool_results = self.tool_result_encoder(tool_results, self.device)
-                    # Add encoded results to carry state for next iteration
-                    # Note: Model doesn't use this yet, but it's prepared for future integration
-                    if 'tool_feedback' not in carry:
-                        carry['tool_feedback'] = encoded_tool_results.unsqueeze(0)
-                    else:
-                        carry['tool_feedback'] = encoded_tool_results.unsqueeze(0)
+                    # Store encoded results in model output for potential future use
+                    model_output['encoded_tool_results'] = encoded_tool_results
                 
                 # Add tool execution results to model output
                 model_output['tool_results'] = tool_results
@@ -878,7 +916,21 @@ class IntegratedEnhancedTrainer:
             stacked_outputs = {}
             for key in batch_outputs[0].keys():
                 if isinstance(batch_outputs[0][key], torch.Tensor):
-                    stacked_outputs[key] = torch.stack([output[key] for output in batch_outputs])
+                    # Check if all outputs have this key as tensor with same shape
+                    try:
+                        tensors_to_stack = []
+                        for output in batch_outputs:
+                            if key in output and isinstance(output[key], torch.Tensor):
+                                tensors_to_stack.append(output[key])
+                        
+                        if len(tensors_to_stack) == len(batch_outputs):
+                            stacked_outputs[key] = torch.stack(tensors_to_stack)
+                        else:
+                            # Not all outputs have this tensor, store as list
+                            stacked_outputs[key] = [output.get(key) for output in batch_outputs]
+                    except RuntimeError:
+                        # Tensors have different shapes, store as list
+                        stacked_outputs[key] = [output.get(key) for output in batch_outputs]
                 else:
                     stacked_outputs[key] = [output[key] for output in batch_outputs]
             
@@ -897,9 +949,9 @@ class IntegratedEnhancedTrainer:
             
             # Update weights every accumulation_steps
             if (batch_idx + 1) % accumulation_steps == 0:
-                # Gradient clipping for both model and tool encoder
+                # Gradient clipping for both model and tool encoder (increased from 1.0 to 2.0)
                 all_params = list(self.model.parameters()) + list(self.tool_result_encoder.parameters())
-                torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(all_params, max_norm=2.0)
                 
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -934,12 +986,12 @@ class IntegratedEnhancedTrainer:
         print(f"📚 Curriculum learning enabled with {len(self.available_tools_by_stage)} stages")
         
         for epoch in range(start_epoch, num_epochs):
-            # Update curriculum stage based on epoch
-            if epoch < 20:
+            # Update curriculum stage based on epoch (accelerated progression)
+            if epoch < 10:
                 self.curriculum_stage = 0
-            elif epoch < 50:
+            elif epoch < 25:
                 self.curriculum_stage = 1
-            elif epoch < 80:
+            elif epoch < 45:
                 self.curriculum_stage = 2
             else:
                 self.curriculum_stage = 3
@@ -1073,25 +1125,25 @@ def main():
     # Create enhanced configuration
     config = create_integrated_enhanced_config()
     
-    # Add training-specific parameters (optimized v3 - aggressive)
+    # Add training-specific parameters (optimized v4 - balanced)
     config.update({
         'batch_size': args.batch_size,
         'num_epochs': args.epochs,
         'eval_frequency': 5,  # More frequent evaluation
         'early_stopping_patience': 25,  # Even more patience
-        'user_profile_lr': 5e-5,  # Further reduced
-        'category_matching_lr': 4e-5,  # Much more reduced (main problem)
-        'tool_selection_lr': 8e-5,  # Reduced
-        'reward_prediction_lr': 1.5e-4,  # INCREASED (needs to learn faster)
-        'main_lr': 5e-5,  # Further reduced
-        'weight_decay': 0.025,  # Much stronger regularization
-        'category_loss_weight': 0.15,  # Much more reduced (learning too fast)
-        'tool_diversity_loss_weight': 0.25,  # Reduced to make room for execution loss
-        'tool_execution_loss_weight': 0.20,  # NEW: Tool execution success loss
-        'reward_loss_weight': 0.35,  # Reduced to balance with execution loss
-        'semantic_matching_loss_weight': 0.15,  # Slightly reduced
-        'embedding_reg_weight': 3e-5,  # Even stronger regularization
-        'tool_encoder_lr': 1e-4,  # Learning rate for tool result encoder
+        'user_profile_lr': 1.2e-4,  # Increased from 5e-5
+        'category_matching_lr': 1.5e-4,  # SIGNIFICANTLY increased from 4e-5
+        'tool_selection_lr': 2e-4,  # Increased from 8e-5
+        'reward_prediction_lr': 2.5e-4,  # Increased from 1.5e-4
+        'main_lr': 1.2e-4,  # Increased from 5e-5
+        'weight_decay': 0.015,  # Reduced from 0.025 (less aggressive)
+        'category_loss_weight': 0.30,  # DOUBLED from 0.15 (category loss too high)
+        'tool_diversity_loss_weight': 0.20,  # Reduced from 0.25
+        'tool_execution_loss_weight': 0.25,  # Increased from 0.20 (more focus on execution)
+        'reward_loss_weight': 0.20,  # Reduced from 0.35 (balance with execution)
+        'semantic_matching_loss_weight': 0.10,  # Reduced from 0.15
+        'embedding_reg_weight': 1.5e-5,  # Reduced from 3e-5 (less aggressive)
+        'tool_encoder_lr': 2e-4,  # Increased from 1e-4
         'hidden_dim': 128  # Hidden dimension for tool encoder
     })
     
