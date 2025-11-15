@@ -36,6 +36,15 @@ class IntegratedEnhancedTRMConfig(RLTRMConfig):
     max_tool_calls_per_step: int = 2
     tool_diversity_weight: float = 0.3
     
+    # Tool-specific parameters (from tool_enhanced_trm)
+    tool_call_threshold: float = 0.5  # Minimum confidence to call tool
+    tool_result_encoding_dim: int = 128
+    tool_selection_method: str = "confidence"  # "confidence", "random", "round_robin"
+    tool_fusion_method: str = "concatenate"  # "concatenate", "attention", "gating"
+    tool_attention_heads: int = 4
+    tool_usage_reward_weight: float = 0.1
+    tool_efficiency_penalty: float = 0.05
+    
     # Enhanced reward calculation
     reward_components: int = 7  # category, budget, hobby, occasion, age, quality, diversity
     reward_fusion_layers: int = 3
@@ -208,6 +217,13 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
             nn.Softmax(dim=-1)
         )
         
+        # Tool parameter generator context projection
+        # Pre-create projection layer to ensure gradient flow
+        self.tool_param_context_proj = nn.Linear(
+            config.user_profile_encoding_dim + len(self.gift_categories),
+            config.tool_context_encoding_dim + config.user_profile_encoding_dim
+        )
+        
         # Tool parameter generator
         self.enhanced_tool_param_generator = nn.Sequential(
             nn.Linear(config.tool_context_encoding_dim + config.user_profile_encoding_dim, 
@@ -324,6 +340,28 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
             nn.Linear(config.cross_modal_fusion_dim // 2, config.action_space_size),
             nn.Softmax(dim=-1)
         )
+        
+        # Tool usage predictor - predicts if tool usage will be beneficial
+        self.tool_usage_predictor = nn.Sequential(
+            nn.Linear(config.user_profile_encoding_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+            nn.Sigmoid()
+        )
+        
+        # Tool result encoder - encodes tool results back to hidden space
+        self.tool_result_encoder_net = nn.Sequential(
+            nn.Linear(config.tool_context_encoding_dim, config.user_profile_encoding_dim),
+            nn.ReLU(),
+            nn.Linear(config.user_profile_encoding_dim, config.user_profile_encoding_dim)
+        )
+        
+        # Tool fusion projection layers
+        self.tool_projection_layer = None  # Will be created dynamically
+        self.fusion_projection_layer = None  # Will be created dynamically
+        
+        # Tool call history
+        self.tool_call_history = []
         
     def _load_and_encode_gift_catalog(self):
         """Load and encode the gift catalog"""
@@ -595,12 +633,8 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
                     category_scores.squeeze(0) if category_scores.dim() > 1 else category_scores
                 ], dim=-1)
                 
-                # Ensure correct dimension
-                expected_dim = self.enhanced_config.tool_context_encoding_dim + self.enhanced_config.user_profile_encoding_dim
-                if tool_context.size(-1) != expected_dim:
-                    # Project to expected dimension
-                    context_proj = nn.Linear(tool_context.size(-1), expected_dim).to(device)
-                    tool_context = context_proj(tool_context)
+                # Use registered projection layer for gradient flow
+                tool_context = self.tool_param_context_proj(tool_context)
                 
                 # Generate parameters
                 param_encoding = self.enhanced_tool_param_generator(tool_context)
@@ -662,6 +696,355 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         }
         
         return carry, rl_output, selected_tools[0] if selected_tools else []
+    
+    def encode_tool_result(self, tool_result: Any) -> torch.Tensor:
+        """
+        Encode tool result into tensor representation
+        
+        Args:
+            tool_result: Result from tool execution
+            
+        Returns:
+            Tensor encoding of the result
+        """
+        device = next(self.parameters()).device
+        
+        if tool_result is None:
+            return torch.zeros(self.enhanced_config.tool_context_encoding_dim, device=device)
+        
+        # Convert tool result to numerical features
+        features = []
+        
+        if isinstance(tool_result, dict):
+            # Extract numerical features from dictionary
+            for key, value in tool_result.items():
+                if isinstance(value, (int, float)):
+                    features.append(float(value))
+                elif isinstance(value, bool):
+                    features.append(float(value))
+                elif isinstance(value, str):
+                    # Simple string encoding
+                    features.append(float(hash(value) % 1000) / 1000.0)
+                elif isinstance(value, list):
+                    # List length and first few elements
+                    features.append(float(len(value)))
+                    for item in value[:3]:  # First 3 items
+                        if isinstance(item, (int, float)):
+                            features.append(float(item))
+                        else:
+                            features.append(float(hash(str(item)) % 100) / 100.0)
+        
+        elif isinstance(tool_result, (list, tuple)):
+            features.append(float(len(tool_result)))
+            for item in tool_result[:10]:  # First 10 items
+                if isinstance(item, (int, float)):
+                    features.append(float(item))
+                else:
+                    features.append(float(hash(str(item)) % 100) / 100.0)
+        
+        elif isinstance(tool_result, (int, float)):
+            features.append(float(tool_result))
+        
+        else:
+            # Fallback for other types
+            features.append(float(hash(str(tool_result)) % 1000) / 1000.0)
+        
+        # Pad or truncate to fixed size
+        target_size = self.enhanced_config.tool_context_encoding_dim
+        if len(features) < target_size:
+            features.extend([0.0] * (target_size - len(features)))
+        else:
+            features = features[:target_size]
+        
+        # Convert to tensor and encode
+        feature_tensor = torch.tensor(features, dtype=torch.float32, device=device)
+        feature_tensor = feature_tensor.unsqueeze(0)  # Add batch dimension
+        encoded_result = self.tool_result_encoder_net(feature_tensor)
+        encoded_result = encoded_result.squeeze(0)  # Remove batch dimension
+        
+        return encoded_result
+    
+    def fuse_tool_results(self, hidden_state: torch.Tensor, 
+                         tool_encodings: List[torch.Tensor]) -> torch.Tensor:
+        """
+        Fuse tool results with hidden state (robust dimension handling)
+        
+        Args:
+            hidden_state: Current hidden state
+            tool_encodings: List of encoded tool results
+            
+        Returns:
+            Fused hidden state
+        """
+        if not tool_encodings:
+            return hidden_state
+        
+        device = hidden_state.device
+        
+        # Stack tool encodings
+        tool_stack = torch.stack(tool_encodings, dim=0).unsqueeze(0)  # [1, num_tools, encoding_dim]
+        
+        # Get tool summary - average across tools
+        tool_summary = tool_stack.mean(dim=1)  # [1, encoding_dim]
+        
+        # Store original hidden state shape
+        original_shape = hidden_state.shape
+        hidden_size = hidden_state.size(-1)
+        
+        # Ensure both tensors are 2D for processing
+        if hidden_state.dim() == 1:
+            hidden_state = hidden_state.unsqueeze(0)  # [1, hidden_size]
+        if tool_summary.dim() == 1:
+            tool_summary = tool_summary.unsqueeze(0)  # [1, encoding_dim]
+        
+        # Ensure tool_summary matches hidden_state's last dimension
+        if tool_summary.size(-1) != hidden_size:
+            if self.tool_projection_layer is None:
+                self.tool_projection_layer = nn.Linear(tool_summary.size(-1), hidden_size).to(device)
+            tool_summary = self.tool_projection_layer(tool_summary)
+        
+        # Ensure batch dimensions match
+        if tool_summary.size(0) != hidden_state.size(0):
+            tool_summary = tool_summary.expand(hidden_state.size(0), -1)
+        
+        # Concatenate along feature dimension
+        combined = torch.cat([hidden_state, tool_summary], dim=-1)  # [batch, hidden_size * 2]
+        
+        # Project back to original hidden size
+        if self.fusion_projection_layer is None:
+            self.fusion_projection_layer = nn.Linear(combined.size(-1), hidden_size).to(device)
+        result = self.fusion_projection_layer(combined)
+        
+        # Restore original shape
+        if len(original_shape) == 1:
+            result = result.squeeze(0)
+        
+        return result
+    
+    def _extract_product_name_from_context(self, env_state: EnvironmentState) -> str:
+        """Extract product name from environment context"""
+        if env_state.current_recommendations:
+            return env_state.current_recommendations[0].name
+        
+        # Fallback based on hobbies
+        hobby_products = {
+            "gardening": "garden tools",
+            "cooking": "kitchen appliances", 
+            "reading": "books",
+            "sports": "fitness equipment",
+            "technology": "gadgets",
+            "fitness": "fitness equipment",
+            "wellness": "wellness products",
+            "art": "art supplies",
+            "music": "musical instruments"
+        }
+        
+        for hobby in env_state.user_profile.hobbies:
+            if hobby in hobby_products:
+                return hobby_products[hobby]
+        
+        return "gift item"
+    
+    def _infer_category_from_hobbies(self, hobbies: List[str]) -> str:
+        """Infer product category from user hobbies"""
+        if not hobbies:
+            return "general"
+        
+        # Simple mapping - could be more sophisticated
+        category_mapping = {
+            "gardening": "gardening",
+            "cooking": "cooking",
+            "reading": "books",
+            "sports": "sports",
+            "technology": "technology",
+            "art": "art",
+            "music": "music",
+            "fitness": "fitness",
+            "wellness": "wellness",
+            "outdoor": "outdoor",
+            "gaming": "gaming"
+        }
+        
+        for hobby in hobbies:
+            if hobby in category_mapping:
+                return category_mapping[hobby]
+        
+        return hobbies[0]  # Fallback to first hobby
+    
+    def execute_tool_call(self, tool_name: str, parameters: Dict[str, Any]) -> ToolCall:
+        """Execute a tool call and return the result"""
+        tool_call = ToolCall(tool_name=tool_name, parameters=parameters)
+        result = self.tool_registry.call_tool(tool_call)
+        
+        # Add to history
+        self.tool_call_history.append(result)
+        
+        return result
+    
+    def forward_with_tools(self, carry, env_state: EnvironmentState, 
+                          available_gifts: List[GiftItem],
+                          max_tool_calls: Optional[int] = None) -> Tuple[Any, Dict[str, torch.Tensor], List[ToolCall]]:
+        """
+        Forward pass with iterative tool usage
+        
+        Args:
+            carry: TRM carry state
+            env_state: Current environment state
+            available_gifts: Available gift items
+            max_tool_calls: Maximum number of tool calls
+            
+        Returns:
+            Tuple of (new_carry, rl_output, tool_calls)
+        """
+        device = next(self.parameters()).device
+        tool_calls = []
+        tool_encodings = []
+        
+        max_calls = max_tool_calls or self.enhanced_config.max_tool_calls_per_step
+        
+        # Initial encoding
+        user_encoding = self.encode_user_profile(env_state.user_profile)
+        
+        # Tool usage loop
+        for step in range(max_calls):
+            # Decide if we should use a tool
+            tool_usage_prob = self.tool_usage_predictor(user_encoding).item()
+            
+            if tool_usage_prob < 0.5:  # Threshold
+                break
+            
+            # Enhanced tool selection
+            category_scores = self.enhanced_category_matching(user_encoding)
+            selected_tools, tool_scores = self.enhanced_tool_selection(user_encoding, category_scores)
+            
+            if not selected_tools or not selected_tools[0]:
+                break
+            
+            # Get first tool
+            tool_name = selected_tools[0][0] if selected_tools[0] else None
+            if not tool_name:
+                break
+            
+            # Get tool parameters
+            tool_params_dict = {}
+            if tool_name:
+                # Generate parameters
+                tool_context = torch.cat([
+                    user_encoding.squeeze(0) if user_encoding.dim() > 1 else user_encoding,
+                    category_scores.squeeze(0) if category_scores.dim() > 1 else category_scores
+                ], dim=-1)
+                
+                # Use registered projection layer for gradient flow
+                tool_context = self.tool_param_context_proj(tool_context)
+                
+                param_encoding = self.enhanced_tool_param_generator(tool_context)
+                
+                # Decode parameters
+                if tool_name == 'price_comparison':
+                    budget_param = torch.sigmoid(param_encoding[0]) * 500.0
+                    tool_params_dict = {'budget': budget_param.item()}
+                elif tool_name == 'review_analysis':
+                    min_rating = torch.sigmoid(param_encoding[1]) * 5.0
+                    tool_params_dict = {'min_rating': min_rating.item()}
+            
+            # Execute tool
+            try:
+                tool_call = self.execute_tool_call(tool_name, tool_params_dict)
+                tool_calls.append(tool_call)
+                
+                if tool_call.success and tool_call.result:
+                    # Encode tool result
+                    tool_encoding = self.encode_tool_result(tool_call.result)
+                    tool_encodings.append(tool_encoding)
+                    
+                    # Update user encoding with tool result
+                    user_encoding = self.fuse_tool_results(user_encoding, [tool_encoding])
+            except Exception as e:
+                print(f"⚠️ Tool execution failed: {e}")
+                break
+        
+        # Final forward pass with tool-enhanced encoding
+        carry, rl_output, selected_tools_final = self.forward_with_enhancements(
+            carry, env_state, available_gifts
+        )
+        
+        return carry, rl_output, tool_calls
+    
+    def compute_tool_usage_reward(self, tool_calls: List[ToolCall], 
+                                 base_reward: float, user_feedback: Dict[str, Any]) -> float:
+        """
+        Compute additional reward based on tool usage effectiveness
+        
+        Args:
+            tool_calls: List of tool calls made
+            base_reward: Base reward from recommendation quality
+            user_feedback: User feedback on recommendations
+            
+        Returns:
+            Additional reward for tool usage
+        """
+        if not tool_calls:
+            return 0.0
+        
+        tool_reward = 0.0
+        
+        for tool_call in tool_calls:
+            if not tool_call.success:
+                tool_reward -= 0.1
+                continue
+            
+            # Reward based on tool type and user feedback
+            if tool_call.tool_name == "price_comparison":
+                if user_feedback.get("price_sensitive", False):
+                    tool_reward += 0.2
+            elif tool_call.tool_name == "review_analysis":
+                if user_feedback.get("quality_focused", False):
+                    tool_reward += 0.2
+            elif tool_call.tool_name == "trend_analyzer":
+                if user_feedback.get("trendy", False):
+                    tool_reward += 0.15
+            elif tool_call.tool_name == "inventory_check":
+                if user_feedback.get("availability_important", False):
+                    tool_reward += 0.15
+            
+            # Efficiency penalty for too many tool calls
+            if len(tool_calls) > 2:
+                tool_reward -= 0.05
+        
+        return tool_reward * 0.1  # Weight
+    
+    def get_tool_usage_stats(self) -> Dict[str, Any]:
+        """Get statistics about tool usage"""
+        if not self.tool_call_history:
+            return {"total_calls": 0}
+        
+        tool_counts = {}
+        success_counts = {}
+        total_time = 0.0
+        
+        for call in self.tool_call_history:
+            tool_counts[call.tool_name] = tool_counts.get(call.tool_name, 0) + 1
+            if call.success:
+                success_counts[call.tool_name] = success_counts.get(call.tool_name, 0) + 1
+            total_time += call.execution_time
+        
+        success_rates = {
+            tool: success_counts.get(tool, 0) / count
+            for tool, count in tool_counts.items()
+        }
+        
+        return {
+            "total_calls": len(self.tool_call_history),
+            "tool_counts": tool_counts,
+            "success_rates": success_rates,
+            "average_execution_time": total_time / len(self.tool_call_history),
+            "most_used_tool": max(tool_counts.keys(), key=tool_counts.get) if tool_counts else None
+        }
+    
+    def clear_tool_history(self):
+        """Clear tool call history"""
+        self.tool_call_history.clear()
+        self.tool_registry.clear_history()
 
 
 def create_integrated_enhanced_config():

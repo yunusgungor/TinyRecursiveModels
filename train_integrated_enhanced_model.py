@@ -712,10 +712,19 @@ class IntegratedEnhancedTrainer:
                     "puzzle_identifiers": torch.zeros(1, 1, device=self.device)
                 })
                 
-                # Forward pass with tool selection
-                carry, model_output, selected_tools = self.model.forward_with_enhancements(
-                    carry, env_state, self.env.gift_catalog
-                )
+                # Forward pass with tool selection and execution
+                # Use forward_with_tools for iterative tool usage
+                if hasattr(self.model, 'forward_with_tools'):
+                    carry, model_output, tool_calls_result = self.model.forward_with_tools(
+                        carry, env_state, self.env.gift_catalog, max_tool_calls=2
+                    )
+                    # Extract selected tools from tool_calls
+                    selected_tools = [tc.tool_name for tc in tool_calls_result] if tool_calls_result else []
+                else:
+                    # Fallback to forward_with_enhancements
+                    carry, model_output, selected_tools = self.model.forward_with_enhancements(
+                        carry, env_state, self.env.gift_catalog
+                    )
                 
                 # Execute selected tools with parameters and sequential execution
                 tool_results = {}
