@@ -134,3 +134,4 @@ test_checkpoints/
 test_data/
 checkpoints/
 wandb/
+test_results/

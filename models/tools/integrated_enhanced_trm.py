@@ -550,17 +550,81 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
     
     def forward_with_enhancements(self, carry, env_state: EnvironmentState, 
                                 available_gifts: List[GiftItem]) -> Tuple[Any, Dict[str, torch.Tensor], List[str]]:
-        """Forward pass with all enhancements integrated"""
+        """Forward pass with all enhancements integrated, including tool feedback and parameters"""
         device = next(self.parameters()).device
         
         # Encode user profile
         user_encoding = self.encode_user_profile(env_state.user_profile)
+        
+        # Check if tool feedback is available in carry state
+        tool_feedback = None
+        if isinstance(carry, dict) and 'tool_feedback' in carry:
+            tool_feedback = carry['tool_feedback']
+            # Integrate tool feedback into user encoding
+            if tool_feedback is not None and tool_feedback.numel() > 0:
+                # Ensure dimensions match
+                if tool_feedback.dim() == 3:
+                    tool_feedback = tool_feedback.squeeze(0)  # Remove batch dim if present
+                if tool_feedback.dim() == 2:
+                    tool_feedback = tool_feedback.squeeze(0)  # Get single vector
+                
+                # Project tool feedback to user encoding dimension if needed
+                if tool_feedback.size(-1) != user_encoding.size(-1):
+                    feedback_proj = nn.Linear(tool_feedback.size(-1), user_encoding.size(-1)).to(device)
+                    tool_feedback = feedback_proj(tool_feedback.unsqueeze(0))
+                else:
+                    tool_feedback = tool_feedback.unsqueeze(0)
+                
+                # Fuse tool feedback with user encoding (additive fusion)
+                user_encoding = user_encoding + 0.3 * tool_feedback  # Weighted addition
         
         # Enhanced category matching
         category_scores = self.enhanced_category_matching(user_encoding)
         
         # Enhanced tool selection
         selected_tools, tool_scores = self.enhanced_tool_selection(user_encoding, category_scores)
+        
+        # Generate tool parameters for selected tools
+        tool_params = {}
+        if selected_tools and len(selected_tools) > 0:
+            tools_list = selected_tools[0] if selected_tools else []
+            for tool_name in tools_list:
+                # Concatenate user encoding and category scores for context
+                tool_context = torch.cat([
+                    user_encoding.squeeze(0) if user_encoding.dim() > 1 else user_encoding,
+                    category_scores.squeeze(0) if category_scores.dim() > 1 else category_scores
+                ], dim=-1)
+                
+                # Ensure correct dimension
+                expected_dim = self.enhanced_config.tool_context_encoding_dim + self.enhanced_config.user_profile_encoding_dim
+                if tool_context.size(-1) != expected_dim:
+                    # Project to expected dimension
+                    context_proj = nn.Linear(tool_context.size(-1), expected_dim).to(device)
+                    tool_context = context_proj(tool_context)
+                
+                # Generate parameters
+                param_encoding = self.enhanced_tool_param_generator(tool_context)
+                
+                # Decode parameters based on tool type
+                if tool_name == 'price_comparison':
+                    # Generate budget parameter (scale to reasonable range)
+                    budget_param = torch.sigmoid(param_encoding[0]) * 500.0  # 0-500 range
+                    tool_params[tool_name] = {'budget': budget_param.item()}
+                
+                elif tool_name == 'review_analysis':
+                    # Generate minimum rating threshold
+                    min_rating = torch.sigmoid(param_encoding[1]) * 5.0  # 0-5 range
+                    tool_params[tool_name] = {'min_rating': min_rating.item()}
+                
+                elif tool_name == 'inventory_check':
+                    # Generate availability threshold
+                    availability_threshold = torch.sigmoid(param_encoding[2])
+                    tool_params[tool_name] = {'threshold': availability_threshold.item()}
+                
+                elif tool_name == 'trend_analyzer':
+                    # Generate trend window parameter
+                    trend_window = torch.sigmoid(param_encoding[3]) * 30.0  # 0-30 days
+                    tool_params[tool_name] = {'window_days': int(trend_window.item())}
         
         # Encode available gifts
         gift_encodings = self.gift_feature_encoder(self.gift_features[:len(available_gifts)].to(device))
@@ -587,13 +651,14 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         # Generate final recommendations
         recommendation_probs = self.recommendation_head(fused_representation.squeeze(1))
         
-        # Prepare outputs
+        # Prepare outputs with tool parameters
         rl_output = {
             "action_probs": recommendation_probs,
             "value_estimates": predicted_rewards.mean(dim=-1, keepdim=True),
             "category_scores": category_scores,
             "tool_scores": tool_scores,
-            "predicted_rewards": predicted_rewards
+            "predicted_rewards": predicted_rewards,
+            "tool_params": tool_params  # NEW: Tool parameters for execution
         }
         
         return carry, rl_output, selected_tools[0] if selected_tools else []

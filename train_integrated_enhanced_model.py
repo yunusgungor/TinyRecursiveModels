@@ -25,6 +25,101 @@ from models.rl.environment import GiftRecommendationEnvironment, UserProfile, Gi
 from models.rl.trainer import RLTrainer, TrainingConfig
 
 
+class ToolResultEncoder(nn.Module):
+    """Encode tool execution results into tensor format for model feedback"""
+    
+    def __init__(self, hidden_dim: int = 128):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        
+        # Encoders for different tool result types
+        self.price_encoder = nn.Sequential(
+            nn.Linear(3, hidden_dim),  # [num_in_budget, num_over_budget, avg_price]
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
+        self.review_encoder = nn.Sequential(
+            nn.Linear(2, hidden_dim),  # [avg_rating, num_items]
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
+        self.inventory_encoder = nn.Sequential(
+            nn.Linear(2, hidden_dim),  # [num_available, num_unavailable]
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
+        self.trend_encoder = nn.Sequential(
+            nn.Linear(2, hidden_dim),  # [num_trending, avg_popularity]
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
+        # Fusion layer to combine multiple tool results
+        self.fusion = nn.Sequential(
+            nn.Linear(hidden_dim * 4, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+    
+    def encode_tool_result(self, tool_name: str, result: Dict, device: torch.device) -> torch.Tensor:
+        """Encode a single tool result"""
+        if tool_name == 'price_comparison':
+            num_in_budget = len(result.get('in_budget', []))
+            num_over_budget = len(result.get('over_budget', []))
+            avg_price = result.get('average_price', 0.0)
+            features = torch.tensor([num_in_budget, num_over_budget, avg_price], dtype=torch.float32, device=device)
+            return self.price_encoder(features)
+        
+        elif tool_name == 'review_analysis':
+            avg_rating = result.get('average_rating', 0.0)
+            num_items = len(result.get('top_rated', []))
+            features = torch.tensor([avg_rating, num_items], dtype=torch.float32, device=device)
+            return self.review_encoder(features)
+        
+        elif tool_name == 'inventory_check':
+            num_available = len(result.get('available', []))
+            num_unavailable = len(result.get('unavailable', []))
+            features = torch.tensor([num_available, num_unavailable], dtype=torch.float32, device=device)
+            return self.inventory_encoder(features)
+        
+        elif tool_name == 'trend_analyzer':
+            num_trending = len(result.get('trending', []))
+            avg_popularity = result.get('average_popularity', 0.0)
+            features = torch.tensor([num_trending, avg_popularity], dtype=torch.float32, device=device)
+            return self.trend_encoder(features)
+        
+        else:
+            return torch.zeros(self.hidden_dim, device=device)
+    
+    def forward(self, tool_results: Dict[str, Dict], device: torch.device) -> torch.Tensor:
+        """Encode all tool results and fuse them"""
+        # Initialize with zeros on correct device
+        encoded_results = {
+            'price_comparison': torch.zeros(self.hidden_dim, device=device),
+            'review_analysis': torch.zeros(self.hidden_dim, device=device),
+            'inventory_check': torch.zeros(self.hidden_dim, device=device),
+            'trend_analyzer': torch.zeros(self.hidden_dim, device=device)
+        }
+        
+        # Encode available results
+        for tool_name, result in tool_results.items():
+            if result:
+                encoded_results[tool_name] = self.encode_tool_result(tool_name, result, device)
+        
+        # Concatenate and fuse
+        concatenated = torch.cat([
+            encoded_results['price_comparison'],
+            encoded_results['review_analysis'],
+            encoded_results['inventory_check'],
+            encoded_results['trend_analyzer']
+        ])
+        
+        return self.fusion(concatenated)
+
+
 class IntegratedEnhancedTrainer:
     """Trainer for the integrated enhanced model with all improvements"""
     
@@ -35,8 +130,20 @@ class IntegratedEnhancedTrainer:
         # Initialize model
         self.model = IntegratedEnhancedTRM(config).to(self.device)
         
+        # Initialize tool result encoder
+        self.tool_result_encoder = ToolResultEncoder(hidden_dim=config.get('hidden_dim', 128)).to(self.device)
+        
         # Initialize environment
         self.env = GiftRecommendationEnvironment("data/realistic_gift_catalog.json")
+        
+        # Curriculum learning settings
+        self.curriculum_stage = 0
+        self.available_tools_by_stage = {
+            0: ['price_comparison'],  # Stage 0: Only price comparison
+            1: ['price_comparison', 'review_analysis'],  # Stage 1: Add reviews
+            2: ['price_comparison', 'review_analysis', 'inventory_check'],  # Stage 2: Add inventory
+            3: ['price_comparison', 'review_analysis', 'inventory_check', 'trend_analyzer']  # Stage 3: All tools
+        }
         
         # Load and split scenarios for train/val
         self._load_and_split_scenarios()
@@ -137,6 +244,13 @@ class IntegratedEnhancedTrainer:
                 'name': 'main_architecture'
             }
         ]
+        
+        # Add tool result encoder parameters
+        param_groups.append({
+            'params': self.tool_result_encoder.parameters(),
+            'lr': self.config.get('tool_encoder_lr', 1e-4),
+            'name': 'tool_result_encoder'
+        })
         
         optimizer = optim.AdamW(param_groups, weight_decay=self.config.get('weight_decay', 0.01))
         
@@ -300,9 +414,9 @@ class IntegratedEnhancedTrainer:
             total_loss += self.config.get('tool_diversity_loss_weight', 0.25) * tool_loss  # Increased from 0.15
             loss_components['tool_loss'] = tool_loss.item()
         
-        # 3. Enhanced reward prediction loss
+        # 3. Enhanced reward prediction loss with tool execution feedback
         if predicted_rewards.numel() > 0:
-            # Calculate target rewards based on category and tool matches
+            # Calculate target rewards based on category, tool matches, and tool execution
             target_rewards = []
             for target in targets:
                 # Base reward from category match
@@ -320,8 +434,12 @@ class IntegratedEnhancedTrainer:
                 num_hobbies = len(target['user_profile'].hobbies)
                 base_reward += min(0.15, num_hobbies * 0.05)
                 
+                # Add tool execution reward (this is the key addition!)
+                tool_exec_reward = target.get('tool_execution_reward', 0.0)
+                base_reward += tool_exec_reward
+                
                 # Clamp to reasonable range
-                base_reward = max(0.4, min(0.9, base_reward))
+                base_reward = max(0.4, min(1.0, base_reward))
                 target_rewards.append(base_reward)
             
             target_reward_tensor = torch.tensor(target_rewards, device=device).unsqueeze(-1)
@@ -335,13 +453,41 @@ class IntegratedEnhancedTrainer:
             reward_loss = nn.MSELoss()(avg_predicted_reward, target_reward_tensor)
             total_loss += self.config.get('reward_loss_weight', 0.40) * reward_loss
             loss_components['reward_loss'] = reward_loss.item()
+            
+            # Track tool execution contribution
+            avg_tool_reward = np.mean([t.get('tool_execution_reward', 0.0) for t in targets])
+            loss_components['tool_execution_reward'] = avg_tool_reward
         
-        # 4. Semantic matching loss
+        # 4. Tool execution success loss (binary classification)
+        tool_execution_loss = torch.tensor(0.0, device=device)
+        if 'tool_execution_success' in model_outputs and isinstance(model_outputs['tool_execution_success'], list):
+            for i, target in enumerate(targets):
+                expected_tools = set(target['expected_tools'])
+                # tool_execution_success is a list of dicts
+                tool_success = model_outputs['tool_execution_success'][i] if i < len(model_outputs['tool_execution_success']) else {}
+                
+                if isinstance(tool_success, dict):
+                    # Penalize if expected tools were not executed successfully
+                    for expected_tool in expected_tools:
+                        if expected_tool not in tool_success or not tool_success[expected_tool]:
+                            tool_execution_loss += 0.1
+                    
+                    # Penalize if unexpected tools were executed
+                    for executed_tool, success in tool_success.items():
+                        if executed_tool not in expected_tools and success:
+                            tool_execution_loss += 0.05
+            
+            if len(targets) > 0:
+                tool_execution_loss = tool_execution_loss / len(targets)
+                total_loss += self.config.get('tool_execution_loss_weight', 0.20) * tool_execution_loss
+                loss_components['tool_execution_loss'] = tool_execution_loss.item()
+        
+        # 5. Semantic matching loss
         semantic_loss = self._compute_semantic_matching_loss(category_scores, targets)
         total_loss += self.config.get('semantic_matching_loss_weight', 0.20) * semantic_loss
         loss_components['semantic_loss'] = semantic_loss.item()
         
-        # 5. Regularization losses
+        # 6. Regularization losses
         # L2 regularization for embeddings
         embedding_reg = (
             torch.norm(self.model.hobby_embeddings.weight) +
@@ -404,19 +550,22 @@ class IntegratedEnhancedTrainer:
         return semantic_loss / len(targets) if targets else torch.tensor(0.0, device=device)
     
     def evaluate_model(self, num_eval_episodes: int = 50) -> Dict[str, float]:
-        """Evaluate the integrated enhanced model on validation set"""
+        """Evaluate the integrated enhanced model on validation set with tool execution"""
         self.model.eval()
+        self.tool_result_encoder.eval()
         
         eval_metrics = {
             'category_match_rate': 0.0,
             'tool_match_rate': 0.0,
             'average_reward': 0.0,
+            'tool_execution_success': 0.0,
             'recommendation_quality': 0.0
         }
         
         category_matches = 0
         tool_matches = 0
         total_rewards = []
+        tool_execution_successes = []
         
         with torch.no_grad():
             for episode in range(num_eval_episodes):
@@ -434,6 +583,66 @@ class IntegratedEnhancedTrainer:
                     carry, env_state, self.env.gift_catalog
                 )
                 
+                # Execute tools and measure success (with all curriculum tools available)
+                tool_execution_reward = 0.0
+                tool_results = {}
+                expected_tools = set(target['expected_tools'])
+                
+                for tool_name in selected_tools:
+                    try:
+                        if tool_name == 'price_comparison':
+                            result = self.model.tool_registry.execute_tool(
+                                'price_comparison', gifts=self.env.gift_catalog, budget=user.budget
+                            )
+                            tool_results[tool_name] = result
+                            if result and len(result.get('in_budget', [])) > 0:
+                                tool_execution_reward += 0.2
+                            # Negative reward if not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.1
+                        
+                        elif tool_name == 'review_analysis':
+                            result = self.model.tool_registry.execute_tool(
+                                'review_analysis', gifts=self.env.gift_catalog
+                            )
+                            tool_results[tool_name] = result
+                            if result and result.get('average_rating', 0) > 4.0:
+                                tool_execution_reward += 0.15
+                            # Negative reward if not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.1
+                        
+                        elif tool_name == 'inventory_check':
+                            result = self.model.tool_registry.execute_tool(
+                                'inventory_check', gifts=self.env.gift_catalog
+                            )
+                            tool_results[tool_name] = result
+                            if result and len(result.get('available', [])) > 0:
+                                tool_execution_reward += 0.1
+                            # Negative reward if not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.1
+                        
+                        elif tool_name == 'trend_analyzer':
+                            result = self.model.tool_registry.execute_tool(
+                                'trend_analyzer', gifts=self.env.gift_catalog, user_age=user.age
+                            )
+                            tool_results[tool_name] = result
+                            if result and len(result.get('trending', [])) > 0:
+                                tool_execution_reward += 0.15
+                            # Negative reward if not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.1
+                    except:
+                        tool_execution_reward -= 0.05  # Penalty for failed execution
+                        continue
+                
+                # Bonus for successful combinations
+                if len(tool_results) >= 2:
+                    tool_execution_reward += 0.1 * (len(tool_results) - 1)
+                
+                tool_execution_successes.append(tool_execution_reward)
+                
                 # Check category matching
                 category_scores = model_outputs['category_scores'][0]
                 top_categories = torch.topk(category_scores, 3).indices
@@ -450,21 +659,26 @@ class IntegratedEnhancedTrainer:
                 if len(expected_tools.intersection(actual_tools)) > 0:
                     tool_matches += 1
                 
-                # Calculate reward
+                # Calculate reward (including tool execution)
                 predicted_reward = model_outputs['predicted_rewards'].mean().item()
-                total_rewards.append(predicted_reward)
+                total_rewards.append(predicted_reward + tool_execution_reward)
         
         eval_metrics['category_match_rate'] = category_matches / num_eval_episodes
         eval_metrics['tool_match_rate'] = tool_matches / num_eval_episodes
         eval_metrics['average_reward'] = np.mean(total_rewards)
-        eval_metrics['recommendation_quality'] = (eval_metrics['category_match_rate'] + 
-                                                eval_metrics['average_reward']) / 2
+        eval_metrics['tool_execution_success'] = np.mean(tool_execution_successes)
+        eval_metrics['recommendation_quality'] = (
+            eval_metrics['category_match_rate'] + 
+            eval_metrics['average_reward'] +
+            eval_metrics['tool_execution_success']
+        ) / 3
         
         self.model.train()
+        self.tool_result_encoder.train()
         return eval_metrics
     
     def train_epoch(self, epoch: int, num_batches: int = 100) -> Dict[str, float]:
-        """Train one epoch with gradient accumulation"""
+        """Train one epoch with gradient accumulation and tool execution"""
         self.model.train()
         
         epoch_losses = {
@@ -472,7 +686,9 @@ class IntegratedEnhancedTrainer:
             'category_loss': [],
             'tool_loss': [],
             'reward_loss': [],
-            'semantic_loss': []
+            'semantic_loss': [],
+            'tool_execution_reward': [],
+            'tool_execution_loss': []
         }
         
         accumulation_steps = 2  # Accumulate gradients over 2 batches
@@ -485,8 +701,10 @@ class IntegratedEnhancedTrainer:
                 use_validation=False
             )
             
-            # Forward pass
+            # Forward pass with tool execution
             batch_outputs = []
+            batch_tool_rewards = []
+            
             for i, user in enumerate(users):
                 env_state = self.env.reset(user)
                 carry = self.model.initial_carry({
@@ -494,10 +712,158 @@ class IntegratedEnhancedTrainer:
                     "puzzle_identifiers": torch.zeros(1, 1, device=self.device)
                 })
                 
+                # Forward pass with tool selection
                 carry, model_output, selected_tools = self.model.forward_with_enhancements(
                     carry, env_state, self.env.gift_catalog
                 )
+                
+                # Execute selected tools with parameters and sequential execution
+                tool_results = {}
+                tool_execution_reward = 0.0
+                tool_execution_success = {}
+                expected_tools = set(targets[i]['expected_tools'])
+                
+                # Filter tools based on curriculum stage
+                available_tools = self.available_tools_by_stage[self.curriculum_stage]
+                filtered_tools = [t for t in selected_tools if t in available_tools]
+                
+                # Negative reward for selecting unavailable tools (curriculum penalty)
+                if len(selected_tools) > len(filtered_tools):
+                    tool_execution_reward -= 0.05 * (len(selected_tools) - len(filtered_tools))
+                
+                # Sequential tool execution with context passing
+                tool_context = {}
+                
+                for tool_name in filtered_tools:
+                    try:
+                        # Get tool parameters from model (now available!)
+                        tool_params_dict = model_output.get('tool_params', {})
+                        
+                        # Execute tool with parameters and context
+                        if tool_name == 'price_comparison':
+                            # Use model-generated budget parameter if available, otherwise user budget
+                            if tool_name in tool_params_dict and 'budget' in tool_params_dict[tool_name]:
+                                budget = tool_params_dict[tool_name]['budget']
+                            else:
+                                budget = user.budget
+                            result = self.model.tool_registry.execute_tool(
+                                'price_comparison',
+                                gifts=self.env.gift_catalog,
+                                budget=budget
+                            )
+                            tool_results[tool_name] = result
+                            tool_context['price_info'] = result
+                            
+                            # Positive reward for finding gifts in budget
+                            if result and len(result.get('in_budget', [])) > 0:
+                                tool_execution_reward += 0.2
+                                tool_execution_success[tool_name] = True
+                            else:
+                                tool_execution_success[tool_name] = False
+                            
+                            # Negative reward if tool was not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.1
+                        
+                        elif tool_name == 'review_analysis':
+                            # Can use price context if available
+                            gifts_to_analyze = self.env.gift_catalog
+                            if 'price_info' in tool_context:
+                                # Focus on in-budget items
+                                in_budget_items = tool_context['price_info'].get('in_budget', [])
+                                if in_budget_items:
+                                    # Extract IDs from in_budget items (they are GiftItem objects)
+                                    in_budget_ids = [item.id if hasattr(item, 'id') else item['id'] for item in in_budget_items]
+                                    gifts_to_analyze = [g for g in self.env.gift_catalog if g.id in in_budget_ids]
+                            
+                            result = self.model.tool_registry.execute_tool(
+                                'review_analysis',
+                                gifts=gifts_to_analyze
+                            )
+                            tool_results[tool_name] = result
+                            tool_context['review_info'] = result
+                            
+                            # Positive reward for finding highly rated items
+                            if result and result.get('average_rating', 0) > 4.0:
+                                tool_execution_reward += 0.15
+                                tool_execution_success[tool_name] = True
+                            else:
+                                tool_execution_success[tool_name] = False
+                            
+                            # Negative reward if tool was not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.1
+                        
+                        elif tool_name == 'inventory_check':
+                            result = self.model.tool_registry.execute_tool(
+                                'inventory_check',
+                                gifts=self.env.gift_catalog
+                            )
+                            tool_results[tool_name] = result
+                            tool_context['inventory_info'] = result
+                            
+                            # Positive reward for checking availability
+                            if result and len(result.get('available', [])) > 0:
+                                tool_execution_reward += 0.1
+                                tool_execution_success[tool_name] = True
+                            else:
+                                tool_execution_success[tool_name] = False
+                            
+                            # Negative reward if tool was not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.1
+                        
+                        elif tool_name == 'trend_analyzer':
+                            result = self.model.tool_registry.execute_tool(
+                                'trend_analyzer',
+                                gifts=self.env.gift_catalog,
+                                user_age=user.age
+                            )
+                            tool_results[tool_name] = result
+                            tool_context['trend_info'] = result
+                            
+                            # Positive reward for finding trending items
+                            if result and len(result.get('trending', [])) > 0:
+                                tool_execution_reward += 0.15
+                                tool_execution_success[tool_name] = True
+                            else:
+                                tool_execution_success[tool_name] = False
+                            
+                            # Negative reward if tool was not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.1
+                        
+                    except Exception as e:
+                        print(f"⚠️ Tool execution failed for {tool_name}: {e}")
+                        tool_execution_success[tool_name] = False
+                        # Penalty for failed execution
+                        tool_execution_reward -= 0.05
+                        continue
+                
+                # Bonus reward for using correct tool combinations
+                if len(filtered_tools) >= 2:
+                    successful_tools = [t for t, success in tool_execution_success.items() if success]
+                    if len(successful_tools) >= 2:
+                        # Bonus for successful multi-tool usage
+                        tool_execution_reward += 0.1 * (len(successful_tools) - 1)
+                
+                # Encode tool results and add to carry state
+                if tool_results:
+                    encoded_tool_results = self.tool_result_encoder(tool_results, self.device)
+                    # Add encoded results to carry state for next iteration
+                    # Note: Model doesn't use this yet, but it's prepared for future integration
+                    if 'tool_feedback' not in carry:
+                        carry['tool_feedback'] = encoded_tool_results.unsqueeze(0)
+                    else:
+                        carry['tool_feedback'] = encoded_tool_results.unsqueeze(0)
+                
+                # Add tool execution results to model output
+                model_output['tool_results'] = tool_results
+                model_output['tool_execution_reward'] = tool_execution_reward
+                model_output['tool_execution_success'] = tool_execution_success
+                
                 batch_outputs.append(model_output)
+                batch_tool_rewards.append(tool_execution_reward)
             
             # Stack outputs
             stacked_outputs = {}
@@ -507,7 +873,11 @@ class IntegratedEnhancedTrainer:
                 else:
                     stacked_outputs[key] = [output[key] for output in batch_outputs]
             
-            # Compute loss
+            # Add tool execution rewards to targets
+            for i, target in enumerate(targets):
+                target['tool_execution_reward'] = batch_tool_rewards[i]
+            
+            # Compute loss with tool execution feedback
             loss, loss_components = self.compute_enhanced_loss(stacked_outputs, targets)
             
             # Scale loss for gradient accumulation
@@ -518,8 +888,9 @@ class IntegratedEnhancedTrainer:
             
             # Update weights every accumulation_steps
             if (batch_idx + 1) % accumulation_steps == 0:
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                # Gradient clipping for both model and tool encoder
+                all_params = list(self.model.parameters()) + list(self.tool_result_encoder.parameters())
+                torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
                 
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -529,9 +900,15 @@ class IntegratedEnhancedTrainer:
                 if key in epoch_losses:
                     epoch_losses[key].append(value * accumulation_steps)
             
+            # Record tool execution rewards
+            if batch_tool_rewards:
+                epoch_losses['tool_execution_reward'].append(np.mean(batch_tool_rewards))
+            
             # Print progress
             if batch_idx % 20 == 0:
-                print(f"Epoch {epoch}, Batch {batch_idx}/{num_batches}, Loss: {loss.item():.4f}")
+                avg_tool_reward = np.mean(batch_tool_rewards) if batch_tool_rewards else 0.0
+                print(f"Epoch {epoch}, Batch {batch_idx}/{num_batches}, "
+                      f"Loss: {loss.item():.4f}, Tool Reward: {avg_tool_reward:.3f}")
         
         # Calculate epoch averages
         epoch_metrics = {}
@@ -541,13 +918,25 @@ class IntegratedEnhancedTrainer:
         
         return epoch_metrics
     
-    def train(self, num_epochs: int = 100, eval_frequency: int = 10):
-        """Main training loop with early stopping and LR scheduling"""
-        print(f"🚀 Starting training for {num_epochs} epochs")
+    def train(self, num_epochs: int = 100, eval_frequency: int = 10, start_epoch: int = 0):
+        """Main training loop with early stopping, LR scheduling, and curriculum learning"""
+        print(f"🚀 Starting training for {num_epochs} epochs (starting from epoch {start_epoch})")
         print(f"📊 Early stopping patience: {self.early_stopping_patience} epochs")
+        print(f"📚 Curriculum learning enabled with {len(self.available_tools_by_stage)} stages")
         
-        for epoch in range(num_epochs):
-            print(f"\n📚 Epoch {epoch + 1}/{num_epochs}")
+        for epoch in range(start_epoch, num_epochs):
+            # Update curriculum stage based on epoch
+            if epoch < 20:
+                self.curriculum_stage = 0
+            elif epoch < 50:
+                self.curriculum_stage = 1
+            elif epoch < 80:
+                self.curriculum_stage = 2
+            else:
+                self.curriculum_stage = 3
+            
+            available_tools = self.available_tools_by_stage[self.curriculum_stage]
+            print(f"\n📚 Epoch {epoch + 1}/{num_epochs} - Curriculum Stage {self.curriculum_stage} - Tools: {available_tools}")
             
             # Train epoch
             train_metrics = self.train_epoch(epoch, num_batches=50)
@@ -555,7 +944,9 @@ class IntegratedEnhancedTrainer:
             # Log training metrics
             print(f"Training - Total Loss: {train_metrics.get('total_loss', 0):.4f}, "
                   f"Category Loss: {train_metrics.get('category_loss', 0):.4f}, "
-                  f"Tool Loss: {train_metrics.get('tool_loss', 0):.4f}")
+                  f"Tool Loss: {train_metrics.get('tool_loss', 0):.4f}, "
+                  f"Tool Exec Loss: {train_metrics.get('tool_execution_loss', 0):.4f}, "
+                  f"Tool Reward: {train_metrics.get('tool_execution_reward', 0):.3f}")
             
             # Evaluate periodically
             if (epoch + 1) % eval_frequency == 0:
@@ -564,6 +955,7 @@ class IntegratedEnhancedTrainer:
                 
                 print(f"Evaluation - Category Match: {eval_metrics['category_match_rate']:.1%}, "
                       f"Tool Match: {eval_metrics['tool_match_rate']:.1%}, "
+                      f"Tool Exec Success: {eval_metrics['tool_execution_success']:.3f}, "
                       f"Avg Reward: {eval_metrics['average_reward']:.3f}, "
                       f"Quality: {eval_metrics['recommendation_quality']:.3f}")
                 
@@ -593,6 +985,30 @@ class IntegratedEnhancedTrainer:
         
         print(f"\n🎉 Training completed! Best score: {self.best_eval_score:.3f}")
     
+    def load_model(self, filepath: str):
+        """Load model checkpoint"""
+        print(f"📂 Loading model from {filepath}")
+        checkpoint = torch.load(filepath, map_location=self.device)
+        
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Load tool result encoder if available
+        if 'tool_result_encoder_state_dict' in checkpoint:
+            self.tool_result_encoder.load_state_dict(checkpoint['tool_result_encoder_state_dict'])
+        
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        # Restore training state
+        if 'training_history' in checkpoint:
+            self.best_eval_score = checkpoint['training_history'].get('best_score', 0.0)
+            self.patience_counter = checkpoint['training_history'].get('patience_counter', 0)
+            if 'curriculum_stage' in checkpoint['training_history']:
+                self.curriculum_stage = checkpoint['training_history']['curriculum_stage']
+        
+        print(f"✅ Model loaded successfully from epoch {checkpoint['epoch']}")
+        return checkpoint['epoch']
+    
     def save_model(self, filename: str, epoch: int, metrics: Dict[str, float]):
         """Save model checkpoint with comprehensive information"""
         os.makedirs("checkpoints/integrated_enhanced", exist_ok=True)
@@ -600,6 +1016,7 @@ class IntegratedEnhancedTrainer:
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
+            'tool_result_encoder_state_dict': self.tool_result_encoder.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict(),
             'config': self.config,
@@ -608,17 +1025,18 @@ class IntegratedEnhancedTrainer:
                 'best_score': self.best_eval_score,
                 'patience_counter': self.patience_counter,
                 'training_scenarios': len(self.train_scenarios),
-                'validation_scenarios': len(self.val_scenarios)
+                'validation_scenarios': len(self.val_scenarios),
+                'curriculum_stage': self.curriculum_stage
             },
             'model_info': {
-                'total_parameters': sum(p.numel() for p in self.model.parameters()),
-                'trainable_parameters': sum(p.numel() for p in self.model.parameters() if p.requires_grad),
+                'total_parameters': sum(p.numel() for p in self.model.parameters()) + sum(p.numel() for p in self.tool_result_encoder.parameters()),
+                'trainable_parameters': sum(p.numel() for p in self.model.parameters() if p.requires_grad) + sum(p.numel() for p in self.tool_result_encoder.parameters() if p.requires_grad),
                 'enhanced_components': [
                     'user_profiling', 'category_matching', 'tool_selection', 
-                    'reward_prediction', 'cross_modal_fusion'
+                    'reward_prediction', 'cross_modal_fusion', 'tool_result_encoding'
                 ],
                 'training_date': datetime.now().isoformat(),
-                'optimization_version': 'v2.0'
+                'optimization_version': 'v3.0'
             }
         }
         
@@ -629,6 +1047,17 @@ class IntegratedEnhancedTrainer:
 
 def main():
     """Main training function"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Train Integrated Enhanced TRM Model')
+    parser.add_argument('--resume', type=str, default=None, 
+                       help='Path to checkpoint to resume training from')
+    parser.add_argument('--epochs', type=int, default=150,
+                       help='Number of epochs to train')
+    parser.add_argument('--batch_size', type=int, default=16,
+                       help='Batch size for training')
+    args = parser.parse_args()
+    
     print("🚀 INTEGRATED ENHANCED TRM TRAINING")
     print("=" * 60)
     
@@ -637,8 +1066,8 @@ def main():
     
     # Add training-specific parameters (optimized v3 - aggressive)
     config.update({
-        'batch_size': 16,
-        'num_epochs': 150,
+        'batch_size': args.batch_size,
+        'num_epochs': args.epochs,
         'eval_frequency': 5,  # More frequent evaluation
         'early_stopping_patience': 25,  # Even more patience
         'user_profile_lr': 5e-5,  # Further reduced
@@ -648,19 +1077,29 @@ def main():
         'main_lr': 5e-5,  # Further reduced
         'weight_decay': 0.025,  # Much stronger regularization
         'category_loss_weight': 0.15,  # Much more reduced (learning too fast)
-        'tool_diversity_loss_weight': 0.30,  # Keep same
-        'reward_loss_weight': 0.40,  # INCREASED (main problem - reward too low)
+        'tool_diversity_loss_weight': 0.25,  # Reduced to make room for execution loss
+        'tool_execution_loss_weight': 0.20,  # NEW: Tool execution success loss
+        'reward_loss_weight': 0.35,  # Reduced to balance with execution loss
         'semantic_matching_loss_weight': 0.15,  # Slightly reduced
-        'embedding_reg_weight': 3e-5  # Even stronger regularization
+        'embedding_reg_weight': 3e-5,  # Even stronger regularization
+        'tool_encoder_lr': 1e-4,  # Learning rate for tool result encoder
+        'hidden_dim': 128  # Hidden dimension for tool encoder
     })
     
     # Initialize trainer
     trainer = IntegratedEnhancedTrainer(config)
     
+    # Resume from checkpoint if specified
+    start_epoch = 0
+    if args.resume:
+        start_epoch = trainer.load_model(args.resume)
+        print(f"🔄 Resuming training from epoch {start_epoch}")
+    
     # Start training
     trainer.train(
         num_epochs=config['num_epochs'],
-        eval_frequency=config['eval_frequency']
+        eval_frequency=config['eval_frequency'],
+        start_epoch=start_epoch
     )
     
     print("🎉 Integrated Enhanced TRM training completed!")
