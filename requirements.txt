@@ -18,3 +18,6 @@ pydantic-core
 huggingface_hub 
 numba
 triton
+# SDV for synthetic data generation
+sdv>=1.0.0
+pandas>=1.5.0
