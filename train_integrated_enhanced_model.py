@@ -630,10 +630,10 @@ class IntegratedEnhancedTrainer:
                             result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             if result and len(result.get('in_budget', [])) > 0:
-                                tool_execution_reward += 0.2
+                                tool_execution_reward += 0.3  # Increased from 0.2
                             # Negative reward if not expected
                             if tool_name not in expected_tools:
-                                tool_execution_reward -= 0.1
+                                tool_execution_reward -= 0.05  # Reduced from -0.1
                         
                         elif tool_name == 'review_analysis':
                             tool_call = self.model.tool_registry.call_tool_by_name(
@@ -641,11 +641,11 @@ class IntegratedEnhancedTrainer:
                             )
                             result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
-                            if result and result.get('average_rating', 0) > 4.0:
-                                tool_execution_reward += 0.15
+                            if result and result.get('average_rating', 0) > 3.5:  # Relaxed from 4.0
+                                tool_execution_reward += 0.25  # Increased from 0.15
                             # Negative reward if not expected
                             if tool_name not in expected_tools:
-                                tool_execution_reward -= 0.1
+                                tool_execution_reward -= 0.05  # Reduced from -0.1
                         
                         elif tool_name == 'inventory_check':
                             tool_call = self.model.tool_registry.call_tool_by_name(
@@ -654,10 +654,10 @@ class IntegratedEnhancedTrainer:
                             result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             if result and len(result.get('available', [])) > 0:
-                                tool_execution_reward += 0.1
+                                tool_execution_reward += 0.2  # Increased from 0.1
                             # Negative reward if not expected
                             if tool_name not in expected_tools:
-                                tool_execution_reward -= 0.1
+                                tool_execution_reward -= 0.05  # Reduced from -0.1
                         
                         elif tool_name == 'trend_analyzer':
                             tool_call = self.model.tool_registry.call_tool_by_name(
@@ -666,17 +666,17 @@ class IntegratedEnhancedTrainer:
                             result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             if result and len(result.get('trending', [])) > 0:
-                                tool_execution_reward += 0.15
+                                tool_execution_reward += 0.25  # Increased from 0.15
                             # Negative reward if not expected
                             if tool_name not in expected_tools:
-                                tool_execution_reward -= 0.1
+                                tool_execution_reward -= 0.05  # Reduced from -0.1
                     except:
                         tool_execution_reward -= 0.05  # Penalty for failed execution
                         continue
                 
                 # Bonus for successful combinations
                 if len(tool_results) >= 2:
-                    tool_execution_reward += 0.1 * (len(tool_results) - 1)
+                    tool_execution_reward += 0.15 * (len(tool_results) - 1)  # Increased from 0.1
                 
                 tool_execution_successes.append(tool_execution_reward)
                 
@@ -801,16 +801,16 @@ class IntegratedEnhancedTrainer:
                             tool_results[tool_name] = result
                             tool_context['price_info'] = result
                             
-                            # Positive reward for finding gifts in budget
+                            # Positive reward for finding gifts in budget (increased from 0.2 to 0.3)
                             if result and len(result.get('in_budget', [])) > 0:
-                                tool_execution_reward += 0.2
+                                tool_execution_reward += 0.3
                                 tool_execution_success[tool_name] = True
                             else:
                                 tool_execution_success[tool_name] = False
                             
-                            # Negative reward if tool was not expected
+                            # Negative reward if tool was not expected (reduced from -0.1 to -0.05)
                             if tool_name not in expected_tools:
-                                tool_execution_reward -= 0.1
+                                tool_execution_reward -= 0.05
                         
                         elif tool_name == 'review_analysis':
                             # Can use price context if available
@@ -831,16 +831,16 @@ class IntegratedEnhancedTrainer:
                             tool_results[tool_name] = result
                             tool_context['review_info'] = result
                             
-                            # Positive reward for finding highly rated items
-                            if result and result.get('average_rating', 0) > 4.0:
-                                tool_execution_reward += 0.15
+                            # Positive reward for finding highly rated items (relaxed from 4.0 to 3.5, increased from 0.15 to 0.25)
+                            if result and result.get('average_rating', 0) > 3.5:
+                                tool_execution_reward += 0.25
                                 tool_execution_success[tool_name] = True
                             else:
                                 tool_execution_success[tool_name] = False
                             
-                            # Negative reward if tool was not expected
+                            # Negative reward if tool was not expected (reduced from -0.1 to -0.05)
                             if tool_name not in expected_tools:
-                                tool_execution_reward -= 0.1
+                                tool_execution_reward -= 0.05
                         
                         elif tool_name == 'inventory_check':
                             tool_call = self.model.tool_registry.call_tool_by_name(
@@ -851,16 +851,16 @@ class IntegratedEnhancedTrainer:
                             tool_results[tool_name] = result
                             tool_context['inventory_info'] = result
                             
-                            # Positive reward for checking availability
+                            # Positive reward for checking availability (increased from 0.1 to 0.2)
                             if result and len(result.get('available', [])) > 0:
-                                tool_execution_reward += 0.1
+                                tool_execution_reward += 0.2
                                 tool_execution_success[tool_name] = True
                             else:
                                 tool_execution_success[tool_name] = False
                             
-                            # Negative reward if tool was not expected
+                            # Negative reward if tool was not expected (reduced from -0.1 to -0.05)
                             if tool_name not in expected_tools:
-                                tool_execution_reward -= 0.1
+                                tool_execution_reward -= 0.05
                         
                         elif tool_name == 'trend_analyzer':
                             tool_call = self.model.tool_registry.call_tool_by_name(
@@ -872,16 +872,16 @@ class IntegratedEnhancedTrainer:
                             tool_results[tool_name] = result
                             tool_context['trend_info'] = result
                             
-                            # Positive reward for finding trending items
+                            # Positive reward for finding trending items (increased from 0.15 to 0.25)
                             if result and len(result.get('trending', [])) > 0:
-                                tool_execution_reward += 0.15
+                                tool_execution_reward += 0.25
                                 tool_execution_success[tool_name] = True
                             else:
                                 tool_execution_success[tool_name] = False
                             
-                            # Negative reward if tool was not expected
+                            # Negative reward if tool was not expected (reduced from -0.1 to -0.05)
                             if tool_name not in expected_tools:
-                                tool_execution_reward -= 0.1
+                                tool_execution_reward -= 0.05
                         
                     except Exception as e:
                         print(f"⚠️ Tool execution failed for {tool_name}: {e}")
@@ -890,12 +890,12 @@ class IntegratedEnhancedTrainer:
                         tool_execution_reward -= 0.05
                         continue
                 
-                # Bonus reward for using correct tool combinations
+                # Bonus reward for using correct tool combinations (increased from 0.1 to 0.15)
                 if len(filtered_tools) >= 2:
                     successful_tools = [t for t, success in tool_execution_success.items() if success]
                     if len(successful_tools) >= 2:
                         # Bonus for successful multi-tool usage
-                        tool_execution_reward += 0.1 * (len(successful_tools) - 1)
+                        tool_execution_reward += 0.15 * (len(successful_tools) - 1)
                 
                 # Encode tool results for future use
                 # Note: Tool feedback integration with carry state is prepared for future enhancement
@@ -1125,7 +1125,7 @@ def main():
     # Create enhanced configuration
     config = create_integrated_enhanced_config()
     
-    # Add training-specific parameters (optimized v4 - balanced)
+    # Add training-specific parameters (optimized v5 - tool execution focused)
     config.update({
         'batch_size': args.batch_size,
         'num_epochs': args.epochs,
@@ -1137,13 +1137,13 @@ def main():
         'reward_prediction_lr': 2.5e-4,  # Increased from 1.5e-4
         'main_lr': 1.2e-4,  # Increased from 5e-5
         'weight_decay': 0.015,  # Reduced from 0.025 (less aggressive)
-        'category_loss_weight': 0.30,  # DOUBLED from 0.15 (category loss too high)
-        'tool_diversity_loss_weight': 0.20,  # Reduced from 0.25
-        'tool_execution_loss_weight': 0.25,  # Increased from 0.20 (more focus on execution)
-        'reward_loss_weight': 0.20,  # Reduced from 0.35 (balance with execution)
-        'semantic_matching_loss_weight': 0.10,  # Reduced from 0.15
-        'embedding_reg_weight': 1.5e-5,  # Reduced from 3e-5 (less aggressive)
-        'tool_encoder_lr': 2e-4,  # Increased from 1e-4
+        'category_loss_weight': 0.25,  # Reduced from 0.30 (already perfect at 100%)
+        'tool_diversity_loss_weight': 0.20,  # Kept same
+        'tool_execution_loss_weight': 0.40,  # INCREASED from 0.25 (main focus!)
+        'reward_loss_weight': 0.10,  # Reduced from 0.20 (make room for execution)
+        'semantic_matching_loss_weight': 0.10,  # Kept same
+        'embedding_reg_weight': 1.5e-5,  # Kept same
+        'tool_encoder_lr': 2e-4,  # Kept same
         'hidden_dim': 128  # Hidden dimension for tool encoder
     })
     
