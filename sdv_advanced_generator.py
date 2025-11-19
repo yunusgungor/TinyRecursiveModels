@@ -15,7 +15,7 @@ try:
     from sdv.single_table import GaussianCopulaSynthesizer, CTGANSynthesizer, TVAESynthesizer
     from sdv.metadata import SingleTableMetadata
     from sdv.evaluation.single_table import evaluate_quality, run_diagnostic
-    from sdv.constraints import Inequality, Positive, Range
+    from sdv.cag import Inequality
     SDV_AVAILABLE = True
 except ImportError:
     SDV_AVAILABLE = False
@@ -118,40 +118,57 @@ class AdvancedGiftDataSynthesizer:
         constraints = []
         
         if df_type == 'gifts':
-            # Price must be positive and reasonable
-            constraints.append(Range(
-                column_name='price',
-                low_value=5.0,
-                high_value=500.0,
-                strict_boundaries=True
-            ))
+            # Price kısıtlaması - dictionary formatında
+            constraints.append({
+                'constraint_class': 'ScalarRange',
+                'constraint_parameters': {
+                    'column_name': 'price',
+                    'low_value': 5.0,
+                    'high_value': 500.0,
+                    'strict_boundaries': False
+                }
+            })
             
-            # Rating between 3.0 and 5.0
-            constraints.append(Range(
-                column_name='rating',
-                low_value=3.0,
-                high_value=5.0,
-                strict_boundaries=True
-            ))
+            # Rating kısıtlaması
+            constraints.append({
+                'constraint_class': 'ScalarRange',
+                'constraint_parameters': {
+                    'column_name': 'rating',
+                    'low_value': 3.0,
+                    'high_value': 5.0,
+                    'strict_boundaries': False
+                }
+            })
             
-            # Age min must be less than age max
-            constraints.append(Inequality(
-                low_column_name='age_min',
-                high_column_name='age_max',
-                strict_boundaries=False
-            ))
+            # Age min < age max kısıtlaması
+            constraints.append(
+                Inequality(
+                    low_column_name='age_min',
+                    high_column_name='age_max',
+                    strict_boundaries=False
+                )
+            )
             
         elif df_type == 'users':
-            # Budget must be positive
-            constraints.append(Positive(column_name='budget'))
+            # Budget pozitif olmalı
+            constraints.append({
+                'constraint_class': 'Positive',
+                'constraint_parameters': {
+                    'column_name': 'budget',
+                    'strict_boundaries': False
+                }
+            })
             
-            # Age must be reasonable
-            constraints.append(Range(
-                column_name='age',
-                low_value=10,
-                high_value=90,
-                strict_boundaries=True
-            ))
+            # Age kısıtlaması
+            constraints.append({
+                'constraint_class': 'ScalarRange',
+                'constraint_parameters': {
+                    'column_name': 'age',
+                    'low_value': 10,
+                    'high_value': 90,
+                    'strict_boundaries': False
+                }
+            })
         
         return constraints
     
@@ -302,13 +319,14 @@ class AdvancedGiftDataSynthesizer:
         
         for name, quality in self.quality_reports.items():
             score = quality.get_score()
+            
+            # Sadece skoru kaydet, detayları DataFrame olduğu için atlıyoruz
             report["synthesizers"][name] = {
-                "overall_score": score,
-                "details": quality.get_details().to_dict() if hasattr(quality, 'get_details') else {}
+                "overall_score": float(score)
             }
             
             if score > report["summary"]["best_score"]:
-                report["summary"]["best_score"] = score
+                report["summary"]["best_score"] = float(score)
                 report["summary"]["best_overall"] = name
         
         with open(output_path, 'w') as f:

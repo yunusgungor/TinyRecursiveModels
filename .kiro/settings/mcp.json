@@ -10,7 +10,10 @@
       ],
       "env": {},
       "disabled": false,
-      "autoApprove": []
+      "autoApprove": [
+        "resolve-library-id",
+        "get-library-docs"
+      ]
     },
     "sequential-thinking": {
       "command": "npx",
