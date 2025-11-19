@@ -2,7 +2,12 @@
   "mcpServers": {
     "Context7": {
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-f1506c34-2d45-4ca1-a440-689169e99ee1"],
+      "args": [
+        "-y",
+        "@upstash/context7-mcp",
+        "--api-key",
+        "ctx7sk-f1506c34-2d45-4ca1-a440-689169e99ee1"
+      ],
       "env": {},
       "disabled": false,
       "autoApprove": []
@@ -12,11 +17,18 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "sequentialthinking"
       ]
     },
     "browsermcp": {
       "command": "npx",
-      "args": ["@browsermcp/mcp@latest"]
+      "args": [
+        "@browsermcp/mcp@latest"
+      ],
+      "disabled": false
     }
   }
 }

@@ -9,6 +9,7 @@ E-ticaret sitelerinden ürün verilerini toplayarak hediye öneri modeli için y
 - 🛡️ **Anti-Bot Protection**: Rate limiting, user agent rotation ve CAPTCHA detection
 - ✅ **Data Validation**: Pydantic ile güçlü veri doğrulama
 - 📊 **Dataset Generation**: Model eğitimi için hazır veri seti oluşturma
+- 🎯 **User Scenario Generation**: Gift catalog'dan otomatik kullanıcı senaryoları oluşturma
 
 ## Kurulum
 
@@ -40,34 +41,36 @@ GEMINI_API_KEY=your_api_key_here
 
 ## Kullanım
 
-### Temel Kullanım
+### 1. Gift Catalog Oluşturma
 
 ```bash
+# Temel kullanım
 python scripts/run_scraping_pipeline.py
-```
 
-### Test Modu (Hızlı Test)
-
-```bash
+# Test modu (hızlı test)
 python scripts/run_scraping_pipeline.py --test
-```
 
-### Belirli Bir Siteden Scraping
-
-```bash
+# Belirli bir siteden scraping
 python scripts/run_scraping_pipeline.py --website ciceksepeti
-```
 
-### Verbose Logging
-
-```bash
+# Verbose logging
 python scripts/run_scraping_pipeline.py --verbose
 ```
 
-### Özel Konfigürasyon
+### 2. User Scenarios Oluşturma
+
+Gift catalog oluşturduktan sonra kullanıcı senaryolarını oluşturun:
 
 ```bash
-python scripts/run_scraping_pipeline.py --config path/to/config.yaml
+# 100 senaryo oluştur (varsayılan)
+python scraping/scripts/generate_user_scenarios.py
+
+# Özel sayıda senaryo
+python scraping/scripts/generate_user_scenarios.py 200
+
+# Gemini API ile (daha gerçekçi senaryolar)
+export GEMINI_API_KEY="your-api-key"
+python scraping/scripts/generate_user_scenarios.py 100
 ```
 
 ## Konfigürasyon
@@ -138,11 +141,18 @@ scraping/
 
 Pipeline çalıştırıldığında şu dosyalar oluşturulur:
 
-- `data/scraped_gift_catalog.json` - Final veri seti
+### Gift Catalog
+- `data/scraped_gift_catalog.json` - Final gift catalog veri seti
 - `data/scraped_raw/` - Ham scraping verileri
 - `data/scraped_processed/` - İşlenmiş veriler
+
+### User Scenarios
+- `data/user_scenarios.json` - Kullanıcı senaryoları veri seti
+
+### Logs
 - `logs/scraping.log` - Ana log dosyası
 - `logs/scraping_errors.log` - Hata logları
+- `logs/user_scenario_generation.log` - Senaryo oluşturma logları
 
 ## Test
 
