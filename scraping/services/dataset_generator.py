@@ -127,10 +127,7 @@ class DatasetGenerator:
             target_audience = product.get('target_audience', [])
             tags = emotional_tags + target_audience
             
-            # Truncate description
-            description = product.get('description', '')[:200]
-            
-            # Build gift item
+            # Build gift item (matching enhanced_realistic_gift_catalog.json structure)
             gift = {
                 "id": gift_id,
                 "name": product.get('name', 'Unknown Product'),
@@ -138,12 +135,8 @@ class DatasetGenerator:
                 "price": product.get('price', 0.0),
                 "rating": product.get('rating', 0.0),
                 "tags": tags,
-                "description": description,
                 "age_range": product.get('age_range', [18, 65]),
-                "occasions": product.get('gift_occasions', ['any']),
-                "source": source,
-                "source_url": product.get('url', ''),
-                "image_url": product.get('image_url')
+                "occasions": product.get('gift_occasions', ['any'])
             }
             
             gifts.append(gift)
@@ -167,10 +160,6 @@ class DatasetGenerator:
         # Price statistics
         prices = [g['price'] for g in gifts if g['price'] > 0]
         
-        # Source distribution
-        sources = [g['source'] for g in gifts]
-        source_counts = dict(Counter(sources))
-        
         metadata = {
             "total_gifts": len(gifts),
             "categories": list(set(categories)),
@@ -180,8 +169,6 @@ class DatasetGenerator:
                 "max": max(prices) if prices else 0,
                 "avg": sum(prices) / len(prices) if prices else 0
             },
-            "sources": list(set(sources)),
-            "source_counts": source_counts,
             "created": datetime.now().isoformat(),
             "version": "1.0"
         }

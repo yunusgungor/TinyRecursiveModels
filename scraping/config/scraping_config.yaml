@@ -1,0 +1,17 @@
+scraping:
+  websites:
+    - name: "trendyol"
+      enabled: true
+      max_products: 100  # Comprehensive dataset
+      categories:
+        - "elektronik"
+
+rate_limit:
+  requests_per_minute: 10
+  delay_between_requests: [2, 5]
+  max_concurrent_requests: 2
+
+gemini:
+  model: "gemini-1.5-flash"
+  max_requests_per_day: 1000
+  retry_attempts: 3

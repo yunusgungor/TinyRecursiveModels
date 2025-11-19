@@ -57,16 +57,23 @@ class BaseScraper(ABC):
         
         self.playwright = await async_playwright().start()
         
-        # Launch browser - use webkit on macOS to avoid Chromium crashes
-        import platform
-        if platform.system() == 'Darwin':  # macOS
-            self.browser = await self.playwright.webkit.launch(
-                headless=self.browser_config.get('headless', True)
-            )
-        else:
-            self.browser = await self.playwright.chromium.launch(
-                headless=self.browser_config.get('headless', True)
-            )
+        # Launch browser - use Chromium with anti-detection args
+        launch_args = [
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-infobars',
+            '--window-position=0,0',
+            '--ignore-certificate-errors',
+            '--ignore-certificate-errors-spki-list',
+            '--disable-accelerated-2d-canvas',
+            '--disable-gpu',
+        ]
+        
+        self.browser = await self.playwright.chromium.launch(
+            headless=self.browser_config.get('headless', True),
+            args=launch_args
+        )
         
         # Create context with anti-bot settings
         viewport = self.browser_config.get('viewport', {'width': 1920, 'height': 1080})

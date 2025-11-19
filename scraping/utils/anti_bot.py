@@ -109,16 +109,16 @@ class AntiBotHelper:
         """
         # More specific CAPTCHA detection patterns
         captcha_keywords = [
-            'g-recaptcha',
-            'recaptcha',
-            'hcaptcha',
-            'cf-challenge',
-            'cloudflare',
+            'challenge-form',
+            'cf-challenge-running',
             'verify you are human',
-            'i am not a robot',
+            'please verify you are a human',
             'güvenlik doğrulaması',
-            'robot değilim',
-            'captcha-box'
+            'robot olmadığınızı doğrulayın',
+            'access denied',
+            'error 1020',
+            'error 1015',
+            'too many requests'
         ]
         
         page_lower = page_content.lower()

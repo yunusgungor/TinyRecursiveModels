@@ -130,6 +130,7 @@ dmypy.json
 
 data/
 data-backup/
+data_old/
 test_checkpoints/
 test_data/
 checkpoints/

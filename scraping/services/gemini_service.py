@@ -29,29 +29,7 @@ class GeminiEnhancementService:
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
-        
-        # Check if google-generativeai is installed
-        if genai is None:
-            raise ImportError(
-                "google-generativeai package not installed. "
-                "Install with: pip install google-generativeai"
-            )
-        
-        # Get API key from environment
-        api_key_env = config.get('api_key_env', 'GEMINI_API_KEY')
-        api_key = os.getenv(api_key_env)
-        
-        if not api_key:
-            raise ValueError(
-                f"Gemini API key not found in environment variable: {api_key_env}"
-            )
-        
-        # Configure Gemini
-        genai.configure(api_key=api_key)
-        
-        # Initialize model
-        model_name = config.get('model', 'gemini-1.5-flash')
-        self.model = genai.GenerativeModel(model_name)
+        self.enabled = True
         
         # Configuration
         self.max_requests = config.get('max_requests_per_day', 1000)
@@ -61,8 +39,34 @@ class GeminiEnhancementService:
         
         # Request tracking
         self.request_count = 0
+
+        # Check if google-generativeai is installed
+        if genai is None:
+            self.logger.warning("google-generativeai package not installed. AI enhancement will be disabled.")
+            self.enabled = False
+            return
         
-        self.logger.info(f"GeminiEnhancementService initialized with model: {model_name}")
+        # Get API key from environment
+        api_key_env = config.get('api_key_env', 'GEMINI_API_KEY')
+        api_key = os.getenv(api_key_env)
+        
+        if not api_key:
+            self.logger.warning(f"Gemini API key not found in environment variable: {api_key_env}. AI enhancement will be disabled.")
+            self.enabled = False
+            return
+        
+        # Configure Gemini
+        try:
+            genai.configure(api_key=api_key)
+            
+            # Initialize model
+            model_name = config.get('model', 'gemini-1.5-flash')
+            self.model = genai.GenerativeModel(model_name)
+            
+            self.logger.info(f"GeminiEnhancementService initialized with model: {model_name}")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize Gemini: {e}. AI enhancement will be disabled.")
+            self.enabled = False
 
     async def enhance_product(self, product: RawProductData) -> Optional[Dict[str, Any]]:
         """
@@ -74,13 +78,17 @@ class GeminiEnhancementService:
         Returns:
             Enhancement dictionary or None if failed
         """
+        # If service is disabled, return fallback enhancement
+        if not self.enabled:
+            return self._get_fallback_enhancement(product)
+        
         # Check request limit
         if self.request_count >= self.max_requests:
             self.logger.warning(
                 f"Daily request limit reached ({self.max_requests}). "
                 "Skipping enhancement."
             )
-            return None
+            return self._get_fallback_enhancement(product)
         
         # Build prompt
         prompt = self._build_prompt(product)
@@ -111,7 +119,7 @@ class GeminiEnhancementService:
         
         # All retries failed
         self.logger.error(f"Failed to enhance product after {self.retry_attempts} attempts")
-        return None
+        return self._get_fallback_enhancement(product)
     
     def _build_prompt(self, product: RawProductData) -> str:
         """
@@ -178,19 +186,82 @@ class GeminiEnhancementService:
         # Fallback: return default enhancement
         return self._get_fallback_enhancement()
     
-    def _get_fallback_enhancement(self) -> Dict[str, Any]:
+    def _get_fallback_enhancement(self, product: RawProductData = None) -> Dict[str, Any]:
         """
-        Get fallback enhancement when API fails
+        Get fallback enhancement when API fails or is disabled
+        Uses rule-based categorization and tag extraction
         
+        Args:
+            product: Optional product data for smart categorization
+            
         Returns:
-            Default enhancement dictionary
+            Enhancement dictionary
         """
+        category = "unknown"
+        tags = []
+        occasions = ["any"]
+        age_range = [18, 65]
+        
+        if product:
+            name_lower = product.name.lower()
+            
+            # Category detection based on keywords
+            category_keywords = {
+                "technology": ["laptop", "macbook", "iphone", "tablet", "phone", "bilgisayar", "telefon", "kulaklık", "headphone", "speaker", "hoparlör"],
+                "home": ["ev", "home", "mutfak", "kitchen", "yatak", "bed", "koltuk", "sofa", "masa", "table"],
+                "beauty": ["makyaj", "makeup", "parfüm", "perfume", "cilt", "skin", "saç", "hair", "fön", "epilasyon", "lazer"],
+                "fitness": ["spor", "sport", "fitness", "yoga", "koşu", "running", "gym", "egzersiz", "dumbbell"],
+                "kitchen": ["kahve", "coffee", "espresso", "blender", "mikser", "tost", "fırın", "oven", "tencere", "pot"],
+                "health": ["sağlık", "health", "terazi", "baskül", "scale", "tansiyon", "termometre", "vitamin"],
+                "gaming": ["gaming", "oyun", "game", "konsol", "console", "joystick", "klavye", "keyboard", "mouse"],
+                "outdoor": ["kamp", "camp", "outdoor", "çadır", "tent", "sırt çantası", "backpack", "bisiklet", "bike"]
+            }
+            
+            for cat, keywords in category_keywords.items():
+                if any(keyword in name_lower for keyword in keywords):
+                    category = cat
+                    break
+            
+            # Tag extraction from product name
+            tag_keywords = {
+                "wireless": ["kablosuz", "wireless", "bluetooth"],
+                "portable": ["taşınabilir", "portable", "mini", "kompakt"],
+                "professional": ["professional", "profesyonel", "pro"],
+                "smart": ["smart", "akıllı", "otomatik", "automatic"],
+                "luxury": ["luxury", "lüks", "premium"],
+                "eco-friendly": ["organik", "organic", "eco", "doğal", "natural"],
+                "digital": ["dijital", "digital", "elektronik", "electronic"],
+                "rechargeable": ["şarj edilebilir", "rechargeable", "pil", "battery"]
+            }
+            
+            for tag, keywords in tag_keywords.items():
+                if any(keyword in name_lower for keyword in keywords):
+                    tags.append(tag)
+            
+            # Occasion detection
+            if category in ["beauty", "health"]:
+                occasions = ["birthday", "mothers_day", "valentines_day"]
+            elif category == "technology":
+                occasions = ["birthday", "graduation", "christmas"]
+            elif category == "fitness":
+                occasions = ["new_year", "birthday"]
+            elif category == "home":
+                occasions = ["housewarming", "wedding", "anniversary"]
+            
+            # Age range based on category
+            if category == "gaming":
+                age_range = [12, 35]
+            elif category == "beauty":
+                age_range = [16, 60]
+            elif category == "fitness":
+                age_range = [18, 55]
+        
         return {
-            "category": "unknown",
-            "target_audience": [],
-            "gift_occasions": ["any"],
-            "emotional_tags": [],
-            "age_range": [18, 65]
+            "category": category,
+            "target_audience": list(set(tags[:2])) if tags else [],  # Use first 2 unique tags as audience
+            "gift_occasions": occasions,
+            "emotional_tags": list(set(tags)),  # Remove duplicates
+            "age_range": age_range
         }
 
     async def enhance_batch(self, products: list, batch_size: int = 10) -> list:

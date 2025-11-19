@@ -6,6 +6,7 @@ Scrapes product data from trendyol.com
 from typing import List, Dict, Any
 from playwright.async_api import Page
 import re
+import asyncio
 
 from .base_scraper import BaseScraper
 
@@ -15,14 +16,20 @@ class TrendyolScraper(BaseScraper):
     
     # Site-specific selectors (to be updated based on actual site structure)
     SELECTORS = {
-        'product_list': '.product-item',
-        'product_link': 'a.product-link',
-        'product_name': 'h1.product-name',
-        'product_price': '.product-price',
-        'product_description': '.product-description',
-        'product_image': 'img.product-image',
-        'product_rating': '.product-rating',
-        'next_page': '.pagination-next',
+        'product_list': '.p-card-wrppr',
+        'product_link': '.p-card-wrppr a',
+        'product_name': 'h1',  # Updated: class pr-new-br no longer used
+        'product_price': 'div.product-price-container span.prc-dsc',
+        'product_description': 'div.detail-border-container',
+        'product_image': 'div.gallery-container img.ph-gl-img',
+        'product_rating': 'div.pr-rnr-sm-p > span',
+        'next_page': 'a.ty-page-i.ty-page-i-next',
+        'product_card_alternatives': [
+            '.p-card-wrppr',
+            '.product-card',
+            '.p-card-ch-item-wrapper',
+            'div[class*="product-item"]'
+        ]
     }
     
     def __init__(self, config: Dict[str, Any], rate_limiter):
@@ -92,26 +99,68 @@ class TrendyolScraper(BaseScraper):
         
         while len(urls) < max_urls:
             try:
-                await page.wait_for_selector(self.SELECTORS['product_list'], timeout=10000)
-                links = await page.query_selector_all(self.SELECTORS['product_link'])
+                # Scroll down to trigger lazy loading
+                for _ in range(5):
+                    await page.keyboard.press('PageDown')
+                    await asyncio.sleep(0.5)
                 
-                for link in links:
+                # Wait for products to load - try multiple selectors
+                found_selector = None
+                for selector in self.SELECTORS['product_card_alternatives']:
+                    try:
+                        if await page.query_selector(selector):
+                            found_selector = selector
+                            break
+                    except:
+                        continue
+                
+                if not found_selector:
+                    # Try waiting for the primary one as a fallback
+                    try:
+                        await page.wait_for_selector(self.SELECTORS['product_list'], timeout=10000)
+                        found_selector = self.SELECTORS['product_list']
+                    except:
+                        self.logger.warning("Timeout waiting for product list, trying to scroll more...")
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        await asyncio.sleep(2)
+                        continue
+
+                # Extract links using the found selector
+                # We assume the link is an 'a' tag inside the card or the card itself is an 'a' tag
+                cards = await page.query_selector_all(found_selector)
+                
+                for card in cards:
                     if len(urls) >= max_urls:
                         break
                     
-                    href = await link.get_attribute('href')
-                    if href:
-                        if href.startswith('/'):
-                            href = self.base_url + href
-                        urls.append(href)
+                    # Try to find 'a' tag inside
+                    link = await card.query_selector('a')
+                    if not link:
+                        # Maybe the card itself is the link
+                        tag_name = await card.evaluate('el => el.tagName')
+                        if tag_name == 'A':
+                            link = card
+                    
+                    if link:
+                        href = await link.get_attribute('href')
+                        if href:
+                            if href.startswith('/'):
+                                href = self.base_url + href
+                            urls.append(href)
                 
-                next_button = await page.query_selector(self.SELECTORS['next_page'])
-                if not next_button or len(urls) >= max_urls:
+                self.logger.info(f"Found {len(urls)} URLs using selector: {found_selector}")
+                
+                # If we still don't have enough URLs, try next page
+                if len(urls) < max_urls:
+                    next_button = await page.query_selector(self.SELECTORS['next_page'])
+                    if not next_button:
+                        break
+                    
+                    await next_button.click()
+                    await page.wait_for_load_state('networkidle')
+                    current_page += 1
+                else:
                     break
-                
-                await next_button.click()
-                await page.wait_for_load_state('networkidle')
-                current_page += 1
                 
             except Exception as e:
                 self.logger.warning(f"Error extracting URLs on page {current_page}: {e}")
@@ -126,23 +175,63 @@ class TrendyolScraper(BaseScraper):
             if not success:
                 return None
             
+            # Wait a bit for dynamic content to load
+            await asyncio.sleep(1)
+            
+            # Extract product name
             name_element = await page.query_selector(self.SELECTORS['product_name'])
             name = await name_element.inner_text() if name_element else "Unknown Product"
             name = name.strip()
             
-            price_element = await page.query_selector(self.SELECTORS['product_price'])
-            price_text = await price_element.inner_text() if price_element else "0"
-            price = self._parse_price(price_text)
+            # Extract price - try multiple selectors
+            price = 0.0
+            price_selectors = [
+                'span.prc-dsc',  # Discounted price
+                'span.prc-slg',  # Regular price
+                '.product-price span',  # Generic price
+                '[data-price]'  # Data attribute
+            ]
             
+            for price_selector in price_selectors:
+                try:
+                    price_element = await page.query_selector(price_selector)
+                    if price_element:
+                        price_text = await price_element.inner_text()
+                        price = self._parse_price(price_text)
+                        if price > 0:
+                            self.logger.debug(f"Found price {price} using selector: {price_selector}")
+                            break
+                except:
+                    continue
+            
+            # If still no price, try to get from page text
+            if price == 0:
+                try:
+                    page_text = await page.content()
+                    # Look for price patterns in TL
+                    import re
+                    price_match = re.search(r'(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*TL', page_text)
+                    if price_match:
+                        price = self._parse_price(price_match.group(1))
+                        self.logger.debug(f"Found price {price} from page content")
+                except:
+                    pass
+            
+            # Extract description
             desc_element = await page.query_selector(self.SELECTORS['product_description'])
             description = await desc_element.inner_text() if desc_element else name
             description = description.strip()
             
+            # Extract image
             img_element = await page.query_selector(self.SELECTORS['product_image'])
+            if not img_element:
+                # Try alternative selectors
+                img_element = await page.query_selector('img.ph-gl-img, .gallery img, .product-image img')
             image_url = await img_element.get_attribute('src') if img_element else None
             
-            rating_element = await page.query_selector(self.SELECTORS['product_rating'])
+            # Extract rating
             rating = 0.0
+            rating_element = await page.query_selector(self.SELECTORS['product_rating'])
             if rating_element:
                 rating_text = await rating_element.inner_text()
                 rating = self._parse_rating(rating_text)
@@ -158,6 +247,8 @@ class TrendyolScraper(BaseScraper):
                 'in_stock': True,
                 'raw_category': self.categories[0] if self.categories else 'genel'
             }
+            
+            self.logger.debug(f"Extracted product: {name[:50]}... Price: {price} TL")
             
             return product_data
             
