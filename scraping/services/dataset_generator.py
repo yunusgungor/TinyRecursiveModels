@@ -122,10 +122,8 @@ class DatasetGenerator:
             source = product.get('source', 'unknown')
             gift_id = f"{source}_{idx:04d}"
             
-            # Combine tags
-            emotional_tags = product.get('emotional_tags', [])
-            target_audience = product.get('target_audience', [])
-            tags = emotional_tags + target_audience
+            # Get tags (only emotional_tags, no duplicates)
+            tags = list(set(product.get('emotional_tags', [])))
             
             # Build gift item (matching enhanced_realistic_gift_catalog.json structure)
             gift = {
