@@ -2,7 +2,7 @@ scraping:
   websites:
     - name: "trendyol"
       enabled: true
-      max_products: 100  # Comprehensive dataset
+      max_products: 100
       categories:
         - "elektronik"
 

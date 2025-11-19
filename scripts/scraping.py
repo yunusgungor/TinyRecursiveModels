@@ -62,7 +62,7 @@ async def run_pipeline(config_path: str = "config/scraping_config.yaml"):
         
         # Dataset generator
         output_config = config_manager.get_output_config()
-        final_dataset_path = output_config.get('final_dataset_path', 'data/scraped_gift_catalog.json')
+        final_dataset_path = output_config.get('final_dataset_path', 'data/gift_catalog.json')
         dataset_generator = DatasetGenerator(final_dataset_path)
 
         # Phase 1: Scrape products
