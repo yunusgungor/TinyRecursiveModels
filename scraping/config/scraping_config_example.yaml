@@ -86,6 +86,8 @@ output:
   raw_data_path: "data/scraped_raw"
   processed_data_path: "data/scraped_processed"
   final_dataset_path: "data/scraped_gift_catalog.json"
+  user_scenarios_path: "data/user_scenarios.json"
+  num_user_scenarios: 100
   
 # Logging
 logging:

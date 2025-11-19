@@ -9,14 +9,14 @@ E-ticaret sitelerinden ürün verilerini toplayarak hediye öneri modeli için y
 - 🛡️ **Anti-Bot Protection**: Rate limiting, user agent rotation ve CAPTCHA detection
 - ✅ **Data Validation**: Pydantic ile güçlü veri doğrulama
 - 📊 **Dataset Generation**: Model eğitimi için hazır veri seti oluşturma
-- 🎯 **User Scenario Generation**: Gift catalog'dan otomatik kullanıcı senaryoları oluşturma
+- 🎯 **Dynamic User Scenario Generation**: Gerçek scraped veriden otomatik kullanıcı senaryoları oluşturma
 
 ## Kurulum
 
 ### 1. Bağımlılıkları Yükleyin
 
 ```bash
-pip install -r requirements_scraping.txt
+pip install -r requirements.txt
 ```
 
 ### 2. Playwright Browser'ı Kurun
@@ -41,36 +41,37 @@ GEMINI_API_KEY=your_api_key_here
 
 ## Kullanım
 
-### 1. Gift Catalog Oluşturma
+### 1. Tam Pipeline (Önerilen)
+
+Tek komutla hem gift catalog hem user scenarios oluşturur:
 
 ```bash
-# Temel kullanım
-python scripts/run_scraping_pipeline.py
+# Temel kullanım (scraping + enhancement + scenarios)
+python scripts/scraping.py
 
 # Test modu (hızlı test)
-python scripts/run_scraping_pipeline.py --test
+python scripts/scraping.py --test
 
 # Belirli bir siteden scraping
-python scripts/run_scraping_pipeline.py --website ciceksepeti
+python scripts/scraping.py --website trendyol
 
 # Verbose logging
-python scripts/run_scraping_pipeline.py --verbose
+python scripts/scraping.py --verbose
 ```
 
-### 2. User Scenarios Oluşturma
+Pipeline otomatik olarak şunları yapar:
+1. Web scraping
+2. Veri validasyonu
+3. Gemini ile enhancement
+4. Gift catalog oluşturma
+5. **User scenarios oluşturma** (gerçek veriden dinamik)
 
-Gift catalog oluşturduktan sonra kullanıcı senaryolarını oluşturun:
+### 2. Sadece User Scenarios Test
+
+Mevcut gift catalog ile scenario generation'ı test etmek için:
 
 ```bash
-# 100 senaryo oluştur (varsayılan)
-python scraping/scripts/generate_user_scenarios.py
-
-# Özel sayıda senaryo
-python scraping/scripts/generate_user_scenarios.py 200
-
-# Gemini API ile (daha gerçekçi senaryolar)
-export GEMINI_API_KEY="your-api-key"
-python scraping/scripts/generate_user_scenarios.py 100
+python scraping/scripts/test_scenario_generator.py
 ```
 
 ## Konfigürasyon
@@ -108,6 +109,15 @@ gemini:
   retry_attempts: 3
 ```
 
+### Output Ayarları
+
+```yaml
+output:
+  final_dataset_path: "data/scraped_gift_catalog.json"
+  user_scenarios_path: "data/user_scenarios.json"
+  num_user_scenarios: 100  # Oluşturulacak senaryo sayısı
+```
+
 ## Proje Yapısı
 
 ```
@@ -135,7 +145,12 @@ scraping/
 1. **Scraping**: Web sitelerinden ürün verilerini toplama
 2. **Validation**: Verileri doğrulama ve temizleme
 3. **Enhancement**: Gemini API ile verileri zenginleştirme
-4. **Generation**: Final veri setini oluşturma
+4. **Dataset Generation**: Final gift catalog'u oluşturma
+5. **User Scenario Generation**: Gerçek veriden dinamik senaryolar oluşturma
+   - Gerçek kategorileri kullanır
+   - Gerçek tag'leri hobi/tercih olarak kullanır
+   - Gerçek occasions'ları kullanır
+   - Gerçek fiyat aralıklarını kullanır
 
 ## Output
 
@@ -153,19 +168,6 @@ Pipeline çalıştırıldığında şu dosyalar oluşturulur:
 - `logs/scraping.log` - Ana log dosyası
 - `logs/scraping_errors.log` - Hata logları
 - `logs/user_scenario_generation.log` - Senaryo oluşturma logları
-
-## Test
-
-```bash
-# Unit testleri çalıştır
-pytest tests/
-
-# Belirli bir test dosyası
-pytest tests/test_validator.py
-
-# Coverage ile
-pytest --cov=scraping tests/
-```
 
 ## Troubleshooting
 

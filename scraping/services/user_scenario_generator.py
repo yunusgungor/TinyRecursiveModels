@@ -93,13 +93,20 @@ class UserScenarioGenerator:
         self.logger.info(f"Generating {num_scenarios} user scenarios...")
         
         scenarios = []
+        
+        # Extract real data from catalog
         categories = self._extract_categories()
+        tags = self._extract_tags()
+        occasions = self._extract_occasions()
+        price_ranges = self._extract_price_ranges()
+        
+        self.logger.info(f"Extracted from catalog: {len(categories)} categories, {len(tags)} tags, {len(occasions)} occasions")
         
         for i in range(num_scenarios):
             if self.enabled and self.request_count < self.max_requests:
-                scenario = await self._generate_ai_scenario(i, categories)
+                scenario = await self._generate_ai_scenario(i, categories, tags, occasions, price_ranges)
             else:
-                scenario = self._generate_fallback_scenario(i, categories)
+                scenario = self._generate_fallback_scenario(i, categories, tags, occasions, price_ranges)
             
             if scenario:
                 scenarios.append(scenario)
@@ -115,12 +122,56 @@ class UserScenarioGenerator:
         gifts = self.gift_catalog.get('gifts', [])
         categories = list(set(gift.get('category', 'unknown') for gift in gifts))
         return [cat for cat in categories if cat != 'unknown']
+    
+    def _extract_tags(self) -> List[str]:
+        """Extract unique tags from gift catalog"""
+        gifts = self.gift_catalog.get('gifts', [])
+        all_tags = []
+        for gift in gifts:
+            tags = gift.get('tags', [])
+            all_tags.extend(tags)
+        return list(set(all_tags))
+    
+    def _extract_occasions(self) -> List[str]:
+        """Extract unique occasions from gift catalog"""
+        gifts = self.gift_catalog.get('gifts', [])
+        all_occasions = []
+        for gift in gifts:
+            occasions = gift.get('occasions', [])
+            all_occasions.extend(occasions)
+        return list(set(all_occasions))
+    
+    def _extract_price_ranges(self) -> Dict[str, tuple]:
+        """Extract price ranges from gift catalog"""
+        gifts = self.gift_catalog.get('gifts', [])
+        prices = [gift.get('price', 0) for gift in gifts if gift.get('price', 0) > 0]
+        
+        if not prices:
+            return {
+                'low': (0, 100),
+                'medium': (100, 200),
+                'high': (200, 300),
+                'premium': (300, 500)
+            }
+        
+        min_price = min(prices)
+        max_price = max(prices)
+        range_size = (max_price - min_price) / 4
+        
+        return {
+            'low': (min_price, min_price + range_size),
+            'medium': (min_price + range_size, min_price + 2 * range_size),
+            'high': (min_price + 2 * range_size, min_price + 3 * range_size),
+            'premium': (min_price + 3 * range_size, max_price)
+        }
 
-    async def _generate_ai_scenario(self, index: int, categories: List[str]) -> Optional[Dict[str, Any]]:
+    async def _generate_ai_scenario(self, index: int, categories: List[str], 
+                                   tags: List[str], occasions: List[str], 
+                                   price_ranges: Dict[str, tuple]) -> Optional[Dict[str, Any]]:
         """Generate scenario using Gemini API"""
         
         # Build prompt
-        prompt = self._build_scenario_prompt(categories)
+        prompt = self._build_scenario_prompt(categories, tags, occasions, price_ranges)
         
         # Try with retries
         for attempt in range(self.retry_attempts):
@@ -140,30 +191,43 @@ class UserScenarioGenerator:
                     await asyncio.sleep(self.retry_delay * (attempt + 1))
         
         # Fallback if all retries failed
-        return self._generate_fallback_scenario(index, categories)
+        return self._generate_fallback_scenario(index, categories, tags, occasions, price_ranges)
 
-    def _build_scenario_prompt(self, categories: List[str]) -> str:
+    def _build_scenario_prompt(self, categories: List[str], tags: List[str], 
+                              occasions: List[str], price_ranges: Dict[str, tuple]) -> str:
         """Build prompt for scenario generation"""
-        return f"""Generate a realistic user profile for gift recommendation testing.
+        
+        # Sample from available data
+        sample_categories = random.sample(categories, min(10, len(categories)))
+        sample_tags = random.sample(tags, min(15, len(tags)))
+        sample_occasions = occasions if len(occasions) <= 10 else random.sample(occasions, 10)
+        
+        # Get price range info
+        price_info = f"{price_ranges['low'][0]:.0f}-{price_ranges['premium'][1]:.0f}"
+        
+        return f"""Generate a realistic user profile for gift recommendation testing based on REAL scraped data.
 
-Available gift categories: {', '.join(categories)}
+REAL Available Categories: {', '.join(sample_categories)}
+REAL Available Tags/Interests: {', '.join(sample_tags)}
+REAL Available Occasions: {', '.join(sample_occasions)}
+REAL Price Range: {price_info} TL
 
 Create a diverse, realistic person with:
 - Age (16-70)
-- 2-4 hobbies/interests from the available categories
-- Relationship to gift recipient (friend, mother, father, sister, brother, colleague, partner, boss)
-- Budget in TL (50-500)
-- Occasion (birthday, mothers_day, fathers_day, christmas, graduation, anniversary, wedding, new_year, valentines_day)
-- 2-4 preferences (trendy, practical, luxury, eco-friendly, tech-savvy, traditional, creative, sporty, etc.)
+- 2-4 hobbies/interests ONLY from the available tags above
+- Relationship to gift recipient (friend, mother, father, sister, brother, colleague, spouse, uncle, aunt, cousin, grandparent)
+- Budget in TL (within the real price range above)
+- Occasion ONLY from the available occasions above
+- 2-4 preferences that match the available tags (e.g., if "luxury" tag exists, use it)
 
 Return ONLY valid JSON:
 {{
   "age": <number>,
-  "hobbies": [<list of 2-4 hobbies>],
+  "hobbies": [<list of 2-4 hobbies from available tags>],
   "relationship": "<relationship>",
-  "budget": <number>,
-  "occasion": "<occasion>",
-  "preferences": [<list of 2-4 preferences>]
+  "budget": <number within real price range>,
+  "occasion": "<occasion from available occasions>",
+  "preferences": [<list of 2-4 preferences from available tags>]
 }}"""
 
     def _parse_scenario_response(self, response: str, index: int) -> Optional[Dict[str, Any]]:
@@ -191,55 +255,90 @@ Return ONLY valid JSON:
         
         return None
 
-    def _generate_fallback_scenario(self, index: int, categories: List[str]) -> Dict[str, Any]:
-        """Generate scenario using rule-based approach"""
+    def _generate_fallback_scenario(self, index: int, categories: List[str], 
+                                   tags: List[str], occasions: List[str], 
+                                   price_ranges: Dict[str, tuple]) -> Dict[str, Any]:
+        """Generate scenario using rule-based approach with REAL scraped data"""
         
-        # Expanded hobby categories (matching expanded_user_scenarios.json)
-        expanded_hobbies = [
+        # Use REAL tags from scraped data as hobbies/preferences
+        available_tags = tags if tags else [
             "technology", "photography", "gaming", "music", "art", "reading",
-            "fitness", "sports", "outdoor", "yoga", "meditation", "wellness",
-            "home_decor", "gardening", "cooking", "food", "travel", 
-            "entertainment", "learning", "business"
+            "fitness", "sports", "outdoor", "wellness", "home_decor", "cooking"
         ]
+        
+        # Use REAL occasions from scraped data
+        available_occasions = occasions if occasions else [
+            "birthday", "mothers_day", "fathers_day", "christmas", "graduation", 
+            "anniversary", "wedding", "new_year"
+        ]
+        
+        # Use REAL categories from scraped data
+        available_categories = categories if categories else ["electronics", "fashion", "home"]
         
         # Random profile generation
         age = random.randint(16, 70)
         num_hobbies = random.randint(2, 4)
-        hobbies = random.sample(expanded_hobbies, num_hobbies)
+        hobbies = random.sample(available_tags, min(num_hobbies, len(available_tags)))
         
-        # Expanded relationships (matching expanded_user_scenarios.json)
+        # Relationships
         relationships = ["friend", "mother", "father", "sister", "brother", "colleague", 
                         "spouse", "uncle", "aunt", "cousin", "grandparent"]
         
-        # Expanded occasions
-        occasions = ["birthday", "mothers_day", "fathers_day", "christmas", "graduation", 
-                    "anniversary", "wedding", "new_year", "promotion", "appreciation"]
+        # Select budget tier and generate budget within that range
+        budget_tier = random.choice(['low', 'medium', 'high', 'premium'])
+        price_range = price_ranges[budget_tier]
+        budget = round(random.uniform(price_range[0], price_range[1]), 2)
         
-        # Expanded preferences
-        preferences_pool = ["trendy", "practical", "luxury", "eco-friendly", "tech-savvy", 
-                           "traditional", "creative", "sporty", "affordable", "quality",
-                           "premium", "sophisticated", "sustainable", "natural", "modern",
-                           "classic", "timeless", "unique", "artistic", "motivational",
-                           "energetic", "active"]
+        # Select preferences from available tags
+        num_preferences = random.randint(2, 4)
+        preferences = random.sample(available_tags, min(num_preferences, len(available_tags)))
         
         profile = {
             "age": age,
             "hobbies": hobbies,
             "relationship": random.choice(relationships),
-            "budget": round(random.uniform(30, 300), 2),
-            "occasion": random.choice(occasions),
-            "preferences": random.sample(preferences_pool, random.randint(2, 4))
+            "budget": budget,
+            "occasion": random.choice(available_occasions),
+            "preferences": preferences
         }
         
         return {
-            "id": f"scenario_{index+1:03d}",  # Format: scenario_001, scenario_002, etc.
+            "id": f"scenario_{index+1:03d}",
             "profile": profile,
-            "expected_categories": self._infer_categories(profile),
+            "expected_categories": self._infer_categories_from_catalog(profile, available_categories),
             "expected_tools": self._infer_tools(profile)
         }
 
+    def _infer_categories_from_catalog(self, profile: Dict[str, Any], 
+                                      available_categories: List[str]) -> List[str]:
+        """Infer expected gift categories from profile using REAL catalog data"""
+        hobbies = profile.get('hobbies', [])
+        preferences = profile.get('preferences', [])
+        
+        # Combine hobbies and preferences for matching
+        interests = set(hobbies + preferences)
+        
+        # Match interests with actual catalog categories
+        matched_categories = []
+        
+        for category in available_categories:
+            category_lower = category.lower()
+            for interest in interests:
+                interest_lower = interest.lower()
+                # Check if interest matches category or vice versa
+                if interest_lower in category_lower or category_lower in interest_lower:
+                    matched_categories.append(category)
+                    break
+        
+        # If no matches found, return random categories from catalog
+        if not matched_categories:
+            num_cats = min(3, len(available_categories))
+            matched_categories = random.sample(available_categories, num_cats)
+        
+        return list(set(matched_categories))[:3]  # Max 3 categories
+    
     def _infer_categories(self, profile: Dict[str, Any]) -> List[str]:
-        """Infer expected gift categories from profile"""
+        """Legacy method for backward compatibility"""
         hobbies = profile.get('hobbies', [])
         
         # Map hobbies to categories

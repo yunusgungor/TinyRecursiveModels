@@ -23,9 +23,10 @@ from scraping.utils.validator import DataValidator
 from scraping.scrapers.orchestrator import ScrapingOrchestrator
 from scraping.services.gemini_service import GeminiEnhancementService
 from scraping.services.dataset_generator import DatasetGenerator
+from scraping.services.user_scenario_generator import UserScenarioGenerator
 
 
-async def run_pipeline(config_path: str = "config/scraping_config.yaml"):
+async def run_pipeline(config_path: str = "../scraping/config/scraping_config.yaml"):
     """
     Run the complete scraping pipeline
     
@@ -100,6 +101,25 @@ async def run_pipeline(config_path: str = "config/scraping_config.yaml"):
         
         dataset = dataset_generator.generate_dataset(unique_products, enhancements)
         
+        # Phase 5: Generate User Scenarios
+        logger.info("\n" + "="*60)
+        logger.info("PHASE 5: Generating User Scenarios")
+        logger.info("="*60)
+        
+        # Initialize user scenario generator
+        user_scenario_generator = UserScenarioGenerator(
+            config=gemini_config,
+            gift_catalog_path=final_dataset_path
+        )
+        
+        # Generate scenarios
+        num_scenarios = output_config.get('num_user_scenarios', 100)
+        scenarios = await user_scenario_generator.generate_scenarios(num_scenarios)
+        
+        # Save scenarios
+        scenarios_output_path = output_config.get('user_scenarios_path', 'data/user_scenarios.json')
+        await user_scenario_generator.save_scenarios(scenarios, scenarios_output_path)
+        
         # Print summary
         logger.info("\n" + "="*60)
         logger.info("PIPELINE COMPLETED SUCCESSFULLY")
@@ -108,11 +128,14 @@ async def run_pipeline(config_path: str = "config/scraping_config.yaml"):
         logger.info(f"Categories: {', '.join(dataset['metadata']['categories'])}")
         logger.info(f"Price range: {dataset['metadata']['price_range']['min']:.2f} - {dataset['metadata']['price_range']['max']:.2f} TL")
         logger.info(f"Dataset saved to: {final_dataset_path}")
+        logger.info(f"User scenarios: {len(scenarios)} scenarios")
+        logger.info(f"Scenarios saved to: {scenarios_output_path}")
         
         # Print statistics
         orchestrator_stats = orchestrator.get_stats()
         validator_stats = validator.get_validation_stats()
         gemini_stats = gemini_service.get_stats()
+        scenario_stats = user_scenario_generator.get_stats()
         
         logger.info("\n" + "="*60)
         logger.info("STATISTICS")
@@ -121,7 +144,9 @@ async def run_pipeline(config_path: str = "config/scraping_config.yaml"):
         logger.info(f"Products by source: {orchestrator_stats.get('products_by_source', {})}")
         logger.info(f"Validation: {validator_stats['valid']}/{validator_stats['total']} valid")
         logger.info(f"Duplicates removed: {validator_stats['duplicates_removed']}")
-        logger.info(f"Gemini requests: {gemini_stats['requests_made']}/{gemini_stats['max_requests_per_day']}")
+        logger.info(f"Gemini requests (enhancement): {gemini_stats['requests_made']}/{gemini_stats['max_requests_per_day']}")
+        logger.info(f"Gemini requests (scenarios): {scenario_stats['requests_made']}/{scenario_stats['max_requests_per_day']}")
+        logger.info(f"Scenario generation method: {scenario_stats['enabled'] and 'AI' or 'Fallback'}")
         
         return dataset
         

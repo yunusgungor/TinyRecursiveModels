@@ -15,3 +15,8 @@ gemini:
   model: "gemini-1.5-flash"
   max_requests_per_day: 1000
   retry_attempts: 3
+
+output:
+  final_dataset_path: "data/gift_catalog.json"
+  user_scenarios_path: "data/user_scenarios.json"
+  num_user_scenarios: 100

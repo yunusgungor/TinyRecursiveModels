@@ -1,36 +1,55 @@
 # User Scenario Generator
 
-Scraping ile elde edilen gift catalog verilerinden gerçekçi kullanıcı senaryoları oluşturur.
+Scraping ile elde edilen **gerçek** gift catalog verilerinden dinamik ve gerçekçi kullanıcı senaryoları oluşturur.
 
 ## Özellikler
 
-- ✅ Gift catalog'dan otomatik kategori çıkarımı
-- ✅ Gemini AI ile akıllı senaryo üretimi
-- ✅ Fallback rule-based generation (API olmadan da çalışır)
-- ✅ Çeşitli yaş grupları, bütçeler ve ilişkiler
-- ✅ Gerçekçi kullanıcı profilleri
+- ✅ **Gerçek veriden dinamik üretim**: Scraped catalog'dan kategoriler, tag'ler, fiyat aralıkları ve özel günler çıkarılır
+- ✅ **Gemini AI entegrasyonu**: Akıllı ve çeşitli senaryo üretimi
+- ✅ **Fallback rule-based generation**: API olmadan da çalışır, gerçek veriyi kullanır
+- ✅ **Otomatik pipeline entegrasyonu**: Scraping pipeline'ın bir parçası olarak çalışır
+- ✅ **Çeşitli profiller**: Yaş grupları, bütçeler, ilişkiler ve tercihler
 
 ## Kullanım
 
-### 1. Temel Kullanım (100 senaryo)
+### 1. Otomatik (Scraping Pipeline ile)
+
+Scraping pipeline çalıştırıldığında otomatik olarak user scenarios üretilir:
 
 ```bash
-python scraping/scripts/generate_user_scenarios.py
+python scripts/scraping.py
 ```
 
-### 2. Özel Sayıda Senaryo
+Pipeline aşamaları:
+1. Web scraping
+2. Veri validasyonu
+3. Gemini ile enhancement
+4. Dataset oluşturma
+5. **User scenarios üretimi** (yeni!)
+
+### 2. Manuel Test (Standalone)
+
+Sadece scenario generation'ı test etmek için:
 
 ```bash
-python scraping/scripts/generate_user_scenarios.py 200
+python scraping/scripts/test_scenario_generator.py
 ```
 
-### 3. Gemini API ile (Opsiyonel)
+### 3. Özel Standalone Script
+
+Eski standalone script (artık önerilmiyor):
+
+```bash
+python scraping/scripts/generate_user_scenarios.py 100
+```
+
+### 4. Gemini API ile (Opsiyonel)
 
 Daha gerçekçi senaryolar için Gemini API kullanabilirsiniz:
 
 ```bash
 export GEMINI_API_KEY="your-api-key-here"
-python scraping/scripts/generate_user_scenarios.py 100
+python scripts/scraping.py
 ```
 
 ## Çıktı Formatı
@@ -60,14 +79,38 @@ python scraping/scripts/generate_user_scenarios.py 100
 }
 ```
 
+## Dinamik Veri Kullanımı
+
+Generator, scraped catalog'dan şu verileri otomatik çıkarır:
+
+- **Kategoriler**: Gerçek ürün kategorileri
+- **Tag'ler**: Ürünlerdeki emotional_tags (hobi ve tercih olarak kullanılır)
+- **Özel Günler**: Ürünlerdeki occasions listesi
+- **Fiyat Aralıkları**: Gerçek ürün fiyatlarından hesaplanan tier'lar (low, medium, high, premium)
+
+Bu sayede üretilen senaryolar **gerçek catalog ile tam uyumlu** olur.
+
+## Konfigürasyon
+
+`scraping/config/scraping_config.yaml`:
+
+```yaml
+output:
+  final_dataset_path: "data/scraped_gift_catalog.json"
+  user_scenarios_path: "data/user_scenarios.json"
+  num_user_scenarios: 100  # Üretilecek senaryo sayısı
+```
+
 ## Gereksinimler
 
-- Gift catalog dosyası: `data/scraped_gift_catalog.json`
+- Gift catalog dosyası: `data/scraped_gift_catalog.json` (scraping pipeline tarafından oluşturulur)
 - Python 3.8+
 - (Opsiyonel) google-generativeai paketi
 
 ## Notlar
 
-- API anahtarı yoksa otomatik olarak rule-based generation kullanılır
-- Senaryolar çeşitli yaş grupları (16-70) ve bütçeler (50-500 TL) içerir
-- Her senaryo farklı ilişki tipleri ve özel günler içerir
+- ✅ API anahtarı yoksa otomatik olarak rule-based generation kullanılır (yine gerçek veriyi kullanır)
+- ✅ Senaryolar gerçek catalog'daki fiyat aralıklarını kullanır
+- ✅ Hobi ve tercihler gerçek ürün tag'lerinden gelir
+- ✅ Özel günler gerçek ürün occasions'larından gelir
+- ✅ Her senaryo farklı ilişki tipleri ve yaş grupları içerir
