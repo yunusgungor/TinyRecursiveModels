@@ -46,25 +46,33 @@ class DatasetGenerator:
         """
         self.logger.info("Generating final dataset...")
         
+        # Load existing dataset if it exists
+        existing_gifts = self._load_existing_dataset()
+        
         # Merge data
         merged_products = self._merge_data(validated_products, enhancements)
         
         # Convert to gift catalog format
-        gift_items = self._convert_to_gift_format(merged_products)
+        new_gift_items = self._convert_to_gift_format(merged_products)
+        
+        # Remove duplicates and merge with existing
+        all_gifts = self._merge_with_existing(existing_gifts, new_gift_items)
+        
+        self.logger.info(f"Total gifts after merge: {len(all_gifts)} (added {len(all_gifts) - len(existing_gifts)} new)")
         
         # Generate metadata
-        metadata = self._generate_metadata(gift_items)
+        metadata = self._generate_metadata(all_gifts)
         
         # Create final dataset
         dataset = {
-            "gifts": gift_items,
+            "gifts": all_gifts,
             "metadata": metadata
         }
         
         # Save dataset
         self._save_dataset(dataset)
         
-        self.logger.info(f"Dataset generated with {len(gift_items)} items")
+        self.logger.info(f"Dataset generated with {len(all_gifts)} items")
         
         return dataset
     
@@ -105,6 +113,74 @@ class DatasetGenerator:
         
         return merged
 
+    def _load_existing_dataset(self) -> List[Dict[str, Any]]:
+        """
+        Load existing dataset if it exists
+        
+        Returns:
+            List of existing gift items or empty list
+        """
+        if not os.path.exists(self.output_path):
+            self.logger.info("No existing dataset found, starting fresh")
+            return []
+        
+        try:
+            with open(self.output_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            existing_gifts = data.get('gifts', [])
+            self.logger.info(f"Loaded {len(existing_gifts)} existing gifts from dataset")
+            return existing_gifts
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to load existing dataset: {e}. Starting fresh.")
+            return []
+    
+    def _merge_with_existing(self, existing_gifts: List[Dict[str, Any]], 
+                            new_gifts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Merge new gifts with existing ones, removing duplicates
+        
+        Args:
+            existing_gifts: List of existing gift items
+            new_gifts: List of new gift items
+            
+        Returns:
+            Merged list without duplicates
+        """
+        # Create a set of existing product signatures for duplicate detection
+        existing_signatures = set()
+        for gift in existing_gifts:
+            # Use name + price as signature for duplicate detection
+            signature = f"{gift.get('name', '').lower().strip()}_{gift.get('price', 0)}"
+            existing_signatures.add(signature)
+        
+        # Filter out duplicates from new gifts
+        unique_new_gifts = []
+        duplicates_found = 0
+        
+        for gift in new_gifts:
+            signature = f"{gift.get('name', '').lower().strip()}_{gift.get('price', 0)}"
+            
+            if signature not in existing_signatures:
+                existing_signatures.add(signature)
+                unique_new_gifts.append(gift)
+            else:
+                duplicates_found += 1
+        
+        if duplicates_found > 0:
+            self.logger.info(f"Filtered out {duplicates_found} duplicate products")
+        
+        # Merge lists
+        all_gifts = existing_gifts + unique_new_gifts
+        
+        # Re-index all gifts to ensure unique IDs
+        for idx, gift in enumerate(all_gifts):
+            source = gift.get('id', 'unknown').split('_')[0]
+            gift['id'] = f"{source}_{idx:04d}"
+        
+        return all_gifts
+    
     def _convert_to_gift_format(self, merged_products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Convert merged data to gift catalog format

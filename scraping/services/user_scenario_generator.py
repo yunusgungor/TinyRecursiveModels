@@ -398,19 +398,27 @@ Return ONLY valid JSON:
 
     async def save_scenarios(self, scenarios: List[Dict[str, Any]], output_path: str) -> None:
         """
-        Save scenarios to JSON file
+        Save scenarios to JSON file, merging with existing scenarios
         
         Args:
-            scenarios: List of scenario dictionaries
+            scenarios: List of new scenario dictionaries
             output_path: Path to save JSON file
         """
         try:
+            # Load existing scenarios if file exists
+            existing_scenarios = self._load_existing_scenarios(output_path)
+            
+            # Merge with existing, removing duplicates
+            all_scenarios = self._merge_scenarios(existing_scenarios, scenarios)
+            
+            self.logger.info(f"Total scenarios after merge: {len(all_scenarios)} (added {len(all_scenarios) - len(existing_scenarios)} new)")
+            
             # Generate metadata
-            metadata = self._generate_metadata(scenarios)
+            metadata = self._generate_metadata(all_scenarios)
             
             # Create output structure
             output = {
-                "scenarios": scenarios,
+                "scenarios": all_scenarios,
                 "metadata": metadata
             }
             
@@ -431,6 +439,92 @@ Return ONLY valid JSON:
         except Exception as e:
             self.logger.error(f"Failed to save scenarios: {e}")
             raise
+    
+    def _load_existing_scenarios(self, output_path: str) -> List[Dict[str, Any]]:
+        """
+        Load existing scenarios from file
+        
+        Args:
+            output_path: Path to scenarios file
+            
+        Returns:
+            List of existing scenarios or empty list
+        """
+        if not os.path.exists(output_path):
+            self.logger.info("No existing scenarios found, starting fresh")
+            return []
+        
+        try:
+            with open(output_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            existing_scenarios = data.get('scenarios', [])
+            self.logger.info(f"Loaded {len(existing_scenarios)} existing scenarios")
+            return existing_scenarios
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to load existing scenarios: {e}. Starting fresh.")
+            return []
+    
+    def _merge_scenarios(self, existing_scenarios: List[Dict[str, Any]], 
+                        new_scenarios: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Merge new scenarios with existing ones, removing duplicates
+        
+        Args:
+            existing_scenarios: List of existing scenarios
+            new_scenarios: List of new scenarios
+            
+        Returns:
+            Merged list without duplicates
+        """
+        # Create signatures for duplicate detection
+        existing_signatures = set()
+        for scenario in existing_scenarios:
+            profile = scenario.get('profile', {})
+            # Use age, relationship, occasion, and budget as signature
+            signature = (
+                profile.get('age', 0),
+                profile.get('relationship', ''),
+                profile.get('occasion', ''),
+                round(profile.get('budget', 0), 2),
+                tuple(sorted(profile.get('hobbies', []))),
+                tuple(sorted(profile.get('preferences', [])))
+            )
+            existing_signatures.add(signature)
+        
+        # Filter out duplicates from new scenarios
+        unique_new_scenarios = []
+        duplicates_found = 0
+        
+        for scenario in new_scenarios:
+            profile = scenario.get('profile', {})
+            signature = (
+                profile.get('age', 0),
+                profile.get('relationship', ''),
+                profile.get('occasion', ''),
+                round(profile.get('budget', 0), 2),
+                tuple(sorted(profile.get('hobbies', []))),
+                tuple(sorted(profile.get('preferences', [])))
+            )
+            
+            if signature not in existing_signatures:
+                existing_signatures.add(signature)
+                unique_new_scenarios.append(scenario)
+            else:
+                duplicates_found += 1
+        
+        if duplicates_found > 0:
+            self.logger.info(f"Filtered out {duplicates_found} duplicate scenarios")
+        
+        # Merge lists
+        all_scenarios = existing_scenarios + unique_new_scenarios
+        
+        # Re-index all scenarios to ensure unique IDs
+        for idx, scenario in enumerate(all_scenarios):
+            scenario['id'] = f"scenario_{idx:04d}"
+        
+        return all_scenarios
 
     def _generate_metadata(self, scenarios: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Generate metadata for scenarios (matching expanded_user_scenarios.json format)"""
