@@ -72,6 +72,9 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         super().__init__(config_dict)
         self.enhanced_config = IntegratedEnhancedTRMConfig(**config_dict)
         
+        # Load dynamic categories from dataset FIRST
+        self._load_dynamic_categories()
+        
         # Initialize tool registry
         self.tool_registry = ToolRegistry()
         self._setup_tools()
@@ -89,6 +92,71 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         
         print(f"🚀 Integrated Enhanced TRM initialized with all improvements built-in")
         
+    def _load_dynamic_categories(self):
+        """Load categories dynamically from dataset files"""
+        try:
+            # Load gift catalog
+            with open("data/gift_catalog.json", "r") as f:
+                catalog_data = json.load(f)
+            
+            # Load user scenarios
+            with open("data/user_scenarios.json", "r") as f:
+                scenarios_data = json.load(f)
+            
+            # Extract unique gift categories
+            gifts = catalog_data.get('gifts', catalog_data)
+            self.gift_categories = sorted(list(set(
+                gift.get('category', 'other') for gift in gifts
+            )))
+            
+            # Extract unique tags as hobby categories
+            all_tags = set()
+            for gift in gifts:
+                all_tags.update(gift.get('tags', []))
+            self.hobby_categories = sorted(list(all_tags))
+            
+            # Extract unique occasions
+            all_occasions = set()
+            for gift in gifts:
+                occasions = gift.get('occasions', [])
+                if isinstance(occasions, list):
+                    all_occasions.update(occasions)
+            
+            # Also get occasions from scenarios
+            scenarios = scenarios_data.get('scenarios', [])
+            for scenario in scenarios:
+                occasion = scenario.get('profile', {}).get('occasion', '')
+                if occasion:
+                    all_occasions.add(occasion)
+            
+            self.occasion_categories = sorted(list(all_occasions))
+            
+            # Extract preferences from scenarios (hobbies field contains preferences/tags)
+            all_preferences = set()
+            for scenario in scenarios:
+                profile = scenario.get('profile', {})
+                all_preferences.update(profile.get('hobbies', []))
+                all_preferences.update(profile.get('preferences', []))
+            
+            # Combine with tags for comprehensive preference list
+            all_preferences.update(all_tags)
+            self.preference_categories = sorted(list(all_preferences))
+            
+            print(f"📊 Loaded dynamic categories:")
+            print(f"  - Gift categories: {len(self.gift_categories)}")
+            print(f"  - Hobby categories: {len(self.hobby_categories)}")
+            print(f"  - Occasion categories: {len(self.occasion_categories)}")
+            print(f"  - Preference categories: {len(self.preference_categories)}")
+            
+        except Exception as e:
+            print(f"⚠️ Error loading dynamic categories: {e}")
+            print(f"⚠️ Falling back to default categories")
+            # Fallback to minimal defaults
+            self.gift_categories = ['technology', 'home', 'beauty', 'health', 'kitchen']
+            self.hobby_categories = ['practical', 'modern', 'digital', 'stylish']
+            self.occasion_categories = ['birthday', 'christmas', 'anniversary']
+            self.preference_categories = ['practical', 'modern', 'stylish', 'digital']
+    
     def _setup_tools(self):
         """Setup and register all available tools"""
         gift_tools = GiftRecommendationTools()
@@ -100,28 +168,13 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         """Initialize enhanced user profiling components"""
         config = self.enhanced_config
         
-        # Hobby embeddings with semantic understanding
-        self.hobby_categories = [
-            'gardening', 'cooking', 'reading', 'sports', 'music', 'art', 'technology', 
-            'travel', 'fitness', 'wellness', 'outdoor', 'gaming', 'photography', 
-            'design', 'business', 'environment', 'sustainability', 'home_decor'
-        ]
+        # Hobby embeddings with semantic understanding (categories loaded dynamically)
         self.hobby_embeddings = nn.Embedding(len(self.hobby_categories), config.hobby_embedding_dim)
         
-        # Preference embeddings
-        self.preference_categories = [
-            'trendy', 'practical', 'tech-savvy', 'relaxing', 'self-care', 'affordable',
-            'traditional', 'quality', 'active', 'healthy', 'motivational', 'creative',
-            'unique', 'artistic', 'luxury', 'professional', 'sophisticated', 
-            'eco-friendly', 'sustainable', 'natural'
-        ]
+        # Preference embeddings (categories loaded dynamically)
         self.preference_embeddings = nn.Embedding(len(self.preference_categories), config.preference_embedding_dim)
         
-        # Occasion embeddings
-        self.occasion_categories = [
-            'birthday', 'christmas', 'mothers_day', 'fathers_day', 'graduation',
-            'anniversary', 'promotion', 'appreciation', 'new_year', 'wedding'
-        ]
+        # Occasion embeddings (categories loaded dynamically)
         self.occasion_embeddings = nn.Embedding(len(self.occasion_categories), config.occasion_embedding_dim)
         
         # Age encoding (continuous)
@@ -154,11 +207,7 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         """Initialize enhanced category matching components"""
         config = self.enhanced_config
         
-        # Gift categories
-        self.gift_categories = [
-            'technology', 'gardening', 'cooking', 'books', 'wellness', 'art', 
-            'fitness', 'outdoor', 'home', 'food', 'experience', 'gaming', 'fashion'
-        ]
+        # Gift categories (loaded dynamically)
         self.category_embeddings = nn.Embedding(len(self.gift_categories), config.category_embedding_dim)
         
         # Semantic matching network - each layer processes category_embedding_dim
@@ -366,7 +415,7 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
     def _load_and_encode_gift_catalog(self):
         """Load and encode the gift catalog"""
         try:
-            with open("data/realistic_gift_catalog.json", "r") as f:
+            with open("data/gift_catalog.json", "r") as f:
                 catalog_data = json.load(f)
             
             gifts = catalog_data.get('gifts', catalog_data)

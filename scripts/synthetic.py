@@ -28,7 +28,7 @@ class FullyLearnedSyntheticGenerator:
     
     def __init__(
         self,
-        gift_path: str = "data/scraped_gift_catalog.json",
+        gift_path: str = "data/gift_catalog.json",
         user_path: str = "data/user_scenarios.json"
     ):
         self.gift_path = Path(gift_path)

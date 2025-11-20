@@ -134,7 +134,7 @@ class IntegratedEnhancedTrainer:
         self.tool_result_encoder = ToolResultEncoder(hidden_dim=config.get('hidden_dim', 128)).to(self.device)
         
         # Initialize environment
-        self.env = GiftRecommendationEnvironment("data/realistic_gift_catalog.json")
+        self.env = GiftRecommendationEnvironment("data/gift_catalog.json")
         
         # Curriculum learning settings
         self.curriculum_stage = 0
@@ -188,12 +188,12 @@ class IntegratedEnhancedTrainer:
     def _load_and_split_scenarios(self):
         """Load scenarios and split into train/validation sets"""
         try:
-            with open("data/expanded_user_scenarios.json", "r") as f:
+            with open("data/user_scenarios.json", "r") as f:
                 scenario_data = json.load(f)
             all_scenarios = scenario_data["scenarios"]
         except:
             try:
-                with open("data/realistic_user_scenarios.json", "r") as f:
+                with open("data/user_scenarios.json", "r") as f:
                     scenario_data = json.load(f)
                 all_scenarios = scenario_data["scenarios"]
             except:

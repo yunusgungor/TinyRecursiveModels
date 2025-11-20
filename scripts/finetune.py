@@ -38,7 +38,7 @@ class CategoryDiversityFineTuner:
         print(f"📊 Original metrics: {checkpoint['metrics']}")
         
         # Initialize environment
-        self.env = GiftRecommendationEnvironment("data/realistic_gift_catalog.json")
+        self.env = GiftRecommendationEnvironment("data/gift_catalog.json")
         
         # Load scenarios
         self._load_scenarios()
@@ -58,11 +58,11 @@ class CategoryDiversityFineTuner:
         import json
         
         try:
-            with open("data/expanded_user_scenarios.json", "r") as f:
+            with open("data/user_scenarios.json", "r") as f:
                 scenario_data = json.load(f)
             all_scenarios = scenario_data["scenarios"]
         except:
-            with open("data/realistic_user_scenarios.json", "r") as f:
+            with open("data/user_scenarios.json", "r") as f:
                 scenario_data = json.load(f)
             all_scenarios = scenario_data["scenarios"]
         
