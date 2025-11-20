@@ -396,13 +396,18 @@ class IntegratedEnhancedTrainer:
             total_loss += self.config.get('category_loss_weight', 0.15) * category_loss  # Much more reduced
             loss_components['category_loss'] = category_loss.item()
         
-        # 2. Tool diversity loss
+        # 2. Tool diversity loss (filtered by curriculum)
         tool_targets = []
         tool_names = list(self.model.tool_registry.list_tools())
+        available_curriculum_tools = self.available_tools_by_stage[self.curriculum_stage]
+        
         for target in targets:
             expected_tools = target['expected_tools']
+            # Filter expected tools by curriculum stage
+            filtered_expected_tools = [t for t in expected_tools if t in available_curriculum_tools]
+            
             target_vector = torch.zeros(len(tool_names), device=device)
-            for tool in expected_tools:
+            for tool in filtered_expected_tools:
                 if tool in tool_names:
                     idx = tool_names.index(tool)
                     target_vector[idx] = 1.0
@@ -773,6 +778,23 @@ class IntegratedEnhancedTrainer:
                 available_tools = self.available_tools_by_stage[self.curriculum_stage]
                 filtered_tools = [t for t in selected_tools if t in available_tools]
                 
+                # DEBUG: Log selected tools
+                if batch_idx == 0 and i == 0:
+                    print(f"  🎯 Selected tools: {selected_tools}")
+                    print(f"  ✅ Filtered tools: {filtered_tools}")
+                    print(f"  📋 Expected tools: {list(expected_tools)}")
+                    print(f"  🎓 Available tools (curriculum): {available_tools}")
+                    
+                    # Log tool scores if available
+                    if 'tool_scores' in model_output:
+                        tool_scores_tensor = model_output['tool_scores']
+                        if tool_scores_tensor.dim() > 1:
+                            tool_scores_tensor = tool_scores_tensor[0]
+                        tool_names = list(self.model.tool_registry.list_tools())
+                        print(f"  📊 Tool scores:")
+                        for idx, (tool_name, score) in enumerate(zip(tool_names, tool_scores_tensor.tolist())):
+                            print(f"     {tool_name}: {score:.3f}")
+                
                 # Negative reward for selecting unavailable tools (curriculum penalty)
                 if len(selected_tools) > len(filtered_tools):
                     tool_execution_reward -= 0.05 * (len(selected_tools) - len(filtered_tools))
@@ -800,6 +822,15 @@ class IntegratedEnhancedTrainer:
                             result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             tool_context['price_info'] = result
+                            
+                            # DEBUG: Log tool execution details
+                            if batch_idx == 0 and i == 0:  # Only log first sample of first batch
+                                in_budget_count = len(result.get('in_budget', [])) if result else 0
+                                print(f"  🔧 price_comparison: budget={budget:.2f}, in_budget_count={in_budget_count}, success={tool_call.success}")
+                                if not tool_call.success:
+                                    print(f"     ❌ Error: {tool_call.error_message}")
+                                if result:
+                                    print(f"     📦 Total gifts: {len(self.env.gift_catalog)}, avg_price: {result.get('average_price', 0):.2f}")
                             
                             # Positive reward for finding gifts in budget (increased from 0.2 to 0.3)
                             if result and len(result.get('in_budget', [])) > 0:
@@ -830,6 +861,11 @@ class IntegratedEnhancedTrainer:
                             result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             tool_context['review_info'] = result
+                            
+                            # DEBUG: Log tool execution details
+                            if batch_idx == 0 and i == 0:
+                                avg_rating = result.get('average_rating', 0) if result else 0
+                                print(f"  🔧 review_analysis: avg_rating={avg_rating:.2f}, success={tool_call.success}")
                             
                             # Positive reward for finding highly rated items (relaxed from 4.0 to 3.5, increased from 0.15 to 0.25)
                             if result and result.get('average_rating', 0) > 3.5:
@@ -884,7 +920,8 @@ class IntegratedEnhancedTrainer:
                                 tool_execution_reward -= 0.05
                         
                     except Exception as e:
-                        print(f"⚠️ Tool execution failed for {tool_name}: {e}")
+                        if batch_idx == 0 and i == 0:
+                            print(f"  ⚠️ Tool execution failed for {tool_name}: {e}")
                         tool_execution_success[tool_name] = False
                         # Penalty for failed execution
                         tool_execution_reward -= 0.05
@@ -896,6 +933,11 @@ class IntegratedEnhancedTrainer:
                     if len(successful_tools) >= 2:
                         # Bonus for successful multi-tool usage
                         tool_execution_reward += 0.15 * (len(successful_tools) - 1)
+                
+                # DEBUG: Log final reward
+                if batch_idx == 0 and i == 0:
+                    print(f"  💰 Tool execution reward: {tool_execution_reward:.3f}")
+                    print(f"  ✓ Tool success: {tool_execution_success}")
                 
                 # Encode tool results for future use
                 # Note: Tool feedback integration with carry state is prepared for future enhancement

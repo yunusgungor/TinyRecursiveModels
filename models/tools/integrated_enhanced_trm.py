@@ -571,20 +571,27 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         )
         
         # Get tool diversity scores
-        tool_scores = self.tool_diversity_head(tool_attended.squeeze(1))
+        tool_scores_raw = self.tool_diversity_head(tool_attended.squeeze(1))
         
-        # Select top tools with diversity
-        num_tools_to_select = min(self.enhanced_config.max_tool_calls_per_step, tool_scores.size(-1))
-        top_tool_indices = torch.topk(tool_scores, num_tools_to_select, dim=-1).indices
+        # Apply sigmoid to normalize scores to [0, 1]
+        tool_scores = torch.sigmoid(tool_scores_raw)
         
-        # Convert to tool names
+        # Select tools with threshold (only select if score > 0.5)
         tool_names = list(self.tool_registry.list_tools())
         selected_tools = []
-        for batch_idx in range(top_tool_indices.size(0)):
+        
+        for batch_idx in range(tool_scores.size(0)):
             batch_tools = []
-            for tool_idx in top_tool_indices[batch_idx]:
-                if tool_idx.item() < len(tool_names):
-                    batch_tools.append(tool_names[tool_idx.item()])
+            # Get scores for this batch
+            batch_scores = tool_scores[batch_idx]
+            
+            # Select tools above threshold, up to max_tool_calls_per_step
+            for tool_idx, score in enumerate(batch_scores):
+                if score > 0.5 and tool_idx < len(tool_names):
+                    batch_tools.append(tool_names[tool_idx])
+                    if len(batch_tools) >= self.enhanced_config.max_tool_calls_per_step:
+                        break
+            
             selected_tools.append(batch_tools)
         
         return selected_tools, tool_scores

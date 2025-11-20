@@ -47,6 +47,15 @@ class FullyLearnedSyntheticGenerator:
             'occasions_user': set()   # Kullanıcı occasion'ları
         }
     
+    @staticmethod
+    def normalize_occasion(occasion: str) -> str:
+        """Occasion'ı normalize et: küçük harf, alt çizgi, parantez temizle"""
+        # Parantez içindeki açıklamaları kaldır
+        if '(' in occasion:
+            occasion = occasion.split('(')[0].strip()
+        # Küçük harfe çevir ve boşlukları alt çizgiye çevir
+        return occasion.lower().replace(' ', '_')
+    
     def learn_from_scraped_data(self):
         """Scraped veriden tüm bilgileri öğren"""
         print("📚 Scraped veriden öğreniliyor...")
@@ -73,9 +82,10 @@ class FullyLearnedSyntheticGenerator:
             for tag in gift.get('tags', []):
                 self.learned_data['tags'][category].add(tag)
             
-            # Occasion'ları öğren
+            # Occasion'ları öğren (normalize edilmiş)
             for occasion in gift.get('occasions', []):
-                self.learned_data['occasions'].add(occasion)
+                normalized = self.normalize_occasion(occasion)
+                self.learned_data['occasions'].add(normalized)
             
             # Fiyat aralıklarını öğren
             price = float(gift['price'])
@@ -111,8 +121,9 @@ class FullyLearnedSyntheticGenerator:
             # İlişkileri öğren
             self.learned_data['relationships'].add(profile['relationship'])
             
-            # Occasion'ları öğren
-            self.learned_data['occasions_user'].add(profile['occasion'])
+            # Occasion'ları öğren (normalize edilmiş)
+            normalized = self.normalize_occasion(profile['occasion'])
+            self.learned_data['occasions_user'].add(normalized)
             
             # Expected categories öğren
             for cat in scenario.get('expected_categories', []):
@@ -420,11 +431,16 @@ class FullyLearnedSyntheticGenerator:
             num_tags = min(int(row['num_tags']), 3)
             num_occasions = min(int(row['num_occasions']), 3)
             
-            # Gerçek ürün ismini kullan (%80 ihtimalle)
-            if category in self.learned_data['product_names'] and random.random() < 0.8:
+            # Her zaman gerçek ürün ismini kullan
+            if category in self.learned_data['product_names'] and self.learned_data['product_names'][category]:
+                # Önce kendi kategorisinden seç
                 product_name = random.choice(self.learned_data['product_names'][category])
             else:
-                product_name = f"Sentetik {category.title()} Ürün {idx}"
+                # Eğer o kategoride ürün yoksa, tüm kategorilerden seç
+                all_names = []
+                for cat_names in self.learned_data['product_names'].values():
+                    all_names.extend(cat_names)
+                product_name = random.choice(all_names) if all_names else f"Ürün {idx}"
             
             # Öğrenilmiş tag'leri kullan
             if category in self.learned_data['tags'] and self.learned_data['tags'][category]:

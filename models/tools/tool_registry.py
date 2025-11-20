@@ -113,7 +113,31 @@ class ToolRegistry:
     def _generate_cache_key(self, tool_name: str, parameters: Dict[str, Any]) -> str:
         """Generate cache key for tool call"""
         # Create deterministic hash of tool name and parameters
-        param_str = json.dumps(parameters, sort_keys=True)
+        # Handle non-serializable objects like GiftItem
+        serializable_params = {}
+        for key, value in parameters.items():
+            if isinstance(value, list):
+                # Handle list of objects (like GiftItem)
+                serializable_list = []
+                for item in value:
+                    if hasattr(item, 'to_dict'):
+                        serializable_list.append(item.to_dict())
+                    elif hasattr(item, '__dict__'):
+                        serializable_list.append(item.__dict__)
+                    else:
+                        serializable_list.append(item)
+                serializable_params[key] = serializable_list
+            elif hasattr(value, 'to_dict'):
+                # Object with to_dict method
+                serializable_params[key] = value.to_dict()
+            elif hasattr(value, '__dict__'):
+                # Generic object with __dict__
+                serializable_params[key] = value.__dict__
+            else:
+                # Primitive type
+                serializable_params[key] = value
+        
+        param_str = json.dumps(serializable_params, sort_keys=True)
         cache_input = f"{tool_name}:{param_str}"
         return hashlib.md5(cache_input.encode()).hexdigest()
     
@@ -162,7 +186,7 @@ class ToolRegistry:
                 tool_call.result = cached_data["result"]
                 tool_call.execution_time = cached_data["execution_time"]
                 tool_call.success = True
-                print(f"Cache hit for {tool_call.tool_name}")
+                # Cache hit - silent for cleaner logs
                 return tool_call
         
         # Execute tool

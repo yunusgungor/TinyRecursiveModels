@@ -30,19 +30,56 @@ class PriceComparisonTool(BaseTool):
             "gittigidiyor": "https://api.gittigidiyor.com/products/search"
         }
     
-    def execute(self, product_name: str, max_sites: int = 5, 
-                category: Optional[str] = None) -> Dict[str, Any]:
+    def execute(self, product_name: Optional[str] = None, max_sites: int = 5, 
+                category: Optional[str] = None, gifts: Optional[List] = None, 
+                budget: Optional[float] = None) -> Dict[str, Any]:
         """
-        Compare prices for a product
+        Compare prices for a product OR filter gifts by budget
         
         Args:
-            product_name: Name of the product to search
-            max_sites: Maximum number of sites to check
+            product_name: Name of the product to search (for web scraping mode)
+            max_sites: Maximum number of sites to check (for web scraping mode)
             category: Product category for better search results
+            gifts: List of gift items to filter (for gift catalog mode)
+            budget: Budget limit to filter gifts (for gift catalog mode)
             
         Returns:
             Dictionary with price comparison results
         """
+        # Gift catalog mode: filter gifts by budget
+        if gifts is not None and budget is not None:
+            in_budget = []
+            over_budget = []
+            total_price = 0.0
+            
+            for gift in gifts:
+                price = gift.price if hasattr(gift, 'price') else gift.get('price', 0)
+                if price <= budget:
+                    in_budget.append(gift)
+                else:
+                    over_budget.append(gift)
+                total_price += price
+            
+            avg_price = total_price / len(gifts) if gifts else 0
+            
+            return {
+                "in_budget": in_budget,
+                "over_budget": over_budget,
+                "budget": budget,
+                "average_price": avg_price,
+                "in_budget_count": len(in_budget),
+                "over_budget_count": len(over_budget),
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Web scraping mode: original functionality
+        if product_name is None:
+            return {
+                "error": "Either product_name or (gifts + budget) must be provided",
+                "in_budget": [],
+                "over_budget": []
+            }
+        
         prices = {}
         product_details = {}
         
@@ -135,7 +172,7 @@ class PriceComparisonTool(BaseTool):
             "properties": {
                 "product_name": {
                     "type": "string",
-                    "description": "Name of the product to search for"
+                    "description": "Name of the product to search for (web scraping mode)"
                 },
                 "max_sites": {
                     "type": "integer",
@@ -147,9 +184,18 @@ class PriceComparisonTool(BaseTool):
                 "category": {
                     "type": "string",
                     "description": "Product category for better search results"
+                },
+                "gifts": {
+                    "type": "array",
+                    "description": "List of gift items to filter (gift catalog mode)"
+                },
+                "budget": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Budget limit to filter gifts (gift catalog mode)"
                 }
             },
-            "required": ["product_name"]
+            "required": []  # No required params - either product_name OR (gifts + budget)
         }
 
 
@@ -162,19 +208,41 @@ class InventoryCheckTool(BaseTool):
             "Check product inventory and availability across stores"
         )
     
-    def execute(self, product_id: str, location: str = "TR", 
-                store_chain: Optional[str] = None) -> Dict[str, Any]:
+    def execute(self, product_id: Optional[str] = None, location: str = "TR", 
+                store_chain: Optional[str] = None, gifts: Optional[List] = None) -> Dict[str, Any]:
         """
-        Check inventory for a product
+        Check inventory for a product OR check gift availability
         
         Args:
-            product_id: Product identifier
+            product_id: Product identifier (for web scraping mode)
             location: Location code (TR, US, etc.)
             store_chain: Specific store chain to check
+            gifts: List of gift items to check (for gift catalog mode)
             
         Returns:
             Dictionary with inventory information
         """
+        # Gift catalog mode: assume all gifts are available
+        if gifts is not None:
+            available = gifts  # In catalog mode, all gifts are available
+            unavailable = []
+            
+            return {
+                "available": available,
+                "unavailable": unavailable,
+                "available_count": len(available),
+                "unavailable_count": len(unavailable),
+                "last_updated": datetime.now().isoformat()
+            }
+        
+        # Web scraping mode: original functionality
+        if product_id is None:
+            return {
+                "error": "Either product_id or gifts must be provided",
+                "available": [],
+                "unavailable": []
+            }
+        
         # Mock inventory check
         inventory_data = self._mock_inventory_check(product_id, location, store_chain)
         
@@ -222,7 +290,7 @@ class InventoryCheckTool(BaseTool):
             "properties": {
                 "product_id": {
                     "type": "string",
-                    "description": "Product identifier to check"
+                    "description": "Product identifier to check (web scraping mode)"
                 },
                 "location": {
                     "type": "string",
@@ -232,9 +300,13 @@ class InventoryCheckTool(BaseTool):
                 "store_chain": {
                     "type": "string",
                     "description": "Specific store chain to check"
+                },
+                "gifts": {
+                    "type": "array",
+                    "description": "List of gift items to check (gift catalog mode)"
                 }
             },
-            "required": ["product_id"]
+            "required": []  # No required params
         }
 
 
@@ -247,19 +319,52 @@ class ReviewAnalysisTool(BaseTool):
             "Analyze product reviews and extract insights"
         )
     
-    def execute(self, product_id: str, max_reviews: int = 100,
-                language: str = "tr") -> Dict[str, Any]:
+    def execute(self, product_id: Optional[str] = None, max_reviews: int = 100,
+                language: str = "tr", gifts: Optional[List] = None) -> Dict[str, Any]:
         """
-        Analyze product reviews
+        Analyze product reviews OR analyze gift ratings
         
         Args:
-            product_id: Product identifier
+            product_id: Product identifier (for web scraping mode)
             max_reviews: Maximum number of reviews to analyze
             language: Language for analysis (tr, en, etc.)
+            gifts: List of gift items to analyze (for gift catalog mode)
             
         Returns:
             Dictionary with review analysis results
         """
+        # Gift catalog mode: analyze gift ratings
+        if gifts is not None:
+            total_rating = 0.0
+            rated_gifts = []
+            top_rated = []
+            
+            for gift in gifts:
+                rating = gift.rating if hasattr(gift, 'rating') else gift.get('rating', 0)
+                if rating > 0:
+                    rated_gifts.append(gift)
+                    total_rating += rating
+                    if rating >= 4.0:
+                        top_rated.append(gift)
+            
+            avg_rating = total_rating / len(rated_gifts) if rated_gifts else 0.0
+            
+            return {
+                "average_rating": avg_rating,
+                "top_rated": top_rated,
+                "rated_count": len(rated_gifts),
+                "total_count": len(gifts),
+                "analysis_date": datetime.now().isoformat()
+            }
+        
+        # Web scraping mode: original functionality
+        if product_id is None:
+            return {
+                "error": "Either product_id or gifts must be provided",
+                "average_rating": 0.0,
+                "top_rated": []
+            }
+        
         # Mock review analysis
         analysis = self._mock_review_analysis(product_id, max_reviews, language)
         
@@ -337,7 +442,7 @@ class ReviewAnalysisTool(BaseTool):
             "properties": {
                 "product_id": {
                     "type": "string",
-                    "description": "Product identifier to analyze"
+                    "description": "Product identifier to analyze (web scraping mode)"
                 },
                 "max_reviews": {
                     "type": "integer",
@@ -350,9 +455,13 @@ class ReviewAnalysisTool(BaseTool):
                     "type": "string",
                     "default": "tr",
                     "description": "Language for analysis"
+                },
+                "gifts": {
+                    "type": "array",
+                    "description": "List of gift items to analyze (gift catalog mode)"
                 }
             },
-            "required": ["product_id"]
+            "required": []  # No required params
         }
 
 
@@ -365,19 +474,56 @@ class TrendAnalysisTool(BaseTool):
             "Analyze product trends and market popularity"
         )
     
-    def execute(self, category: str, time_period: str = "30d",
-                region: str = "TR") -> Dict[str, Any]:
+    def execute(self, category: Optional[str] = None, time_period: str = "30d",
+                region: str = "TR", gifts: Optional[List] = None, user_age: Optional[int] = None) -> Dict[str, Any]:
         """
-        Analyze trends for a product category
+        Analyze trends for a product category OR find trending gifts
         
         Args:
-            category: Product category to analyze
+            category: Product category to analyze (for web scraping mode)
             time_period: Time period (7d, 30d, 90d, 1y)
             region: Region for analysis
+            gifts: List of gift items to analyze (for gift catalog mode)
+            user_age: User age for age-appropriate trending items
             
         Returns:
             Dictionary with trend analysis results
         """
+        # Gift catalog mode: find trending gifts (high ratings, popular tags)
+        if gifts is not None:
+            trending = []
+            avg_popularity = 0.0
+            
+            for gift in gifts:
+                rating = gift.rating if hasattr(gift, 'rating') else gift.get('rating', 0)
+                tags = gift.tags if hasattr(gift, 'tags') else gift.get('tags', [])
+                
+                # Consider trending if rating > 4.0 or has "trendy" tag
+                is_trending = rating >= 4.0 or 'trendy' in tags or 'popular' in tags
+                
+                if is_trending:
+                    trending.append(gift)
+                
+                # Calculate popularity score based on rating
+                avg_popularity += rating / 5.0  # Normalize to 0-1
+            
+            avg_popularity = avg_popularity / len(gifts) if gifts else 0.0
+            
+            return {
+                "trending": trending,
+                "trending_count": len(trending),
+                "average_popularity": avg_popularity,
+                "analysis_date": datetime.now().isoformat()
+            }
+        
+        # Web scraping mode: original functionality
+        if category is None:
+            return {
+                "error": "Either category or gifts must be provided",
+                "trending": [],
+                "average_popularity": 0.0
+            }
+        
         trend_data = self._mock_trend_analysis(category, time_period, region)
         
         return {
@@ -455,7 +601,7 @@ class TrendAnalysisTool(BaseTool):
             "properties": {
                 "category": {
                     "type": "string",
-                    "description": "Product category to analyze"
+                    "description": "Product category to analyze (web scraping mode)"
                 },
                 "time_period": {
                     "type": "string",
@@ -467,9 +613,17 @@ class TrendAnalysisTool(BaseTool):
                     "type": "string",
                     "default": "TR",
                     "description": "Region for analysis"
+                },
+                "gifts": {
+                    "type": "array",
+                    "description": "List of gift items to analyze (gift catalog mode)"
+                },
+                "user_age": {
+                    "type": "integer",
+                    "description": "User age for age-appropriate trending items"
                 }
             },
-            "required": ["category"]
+            "required": []  # No required params
         }
 
 
