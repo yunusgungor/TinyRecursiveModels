@@ -8,15 +8,33 @@ scraping:
 
 rate_limit:
   requests_per_minute: 10
-  delay_between_requests: [2, 5]
-  max_concurrent_requests: 2
+  delay_between_requests: [5, 10]
+  max_concurrent_requests: 1
 
 gemini:
-  model: "gemini-1.5-flash"
+  api_key_env: "GEMINI_API_KEY"
+  model: "gemini-2.0-flash"
   max_requests_per_day: 1000
   retry_attempts: 3
+  retry_delay: 5
+  timeout: 30
+  batch_size: 1  # Process 1 at a time to avoid rate limits
+  batch_delay: 5  # Wait 5 seconds between requests
+  
+  enhancement_prompt: |
+    Analyze this product and provide structured information:
+    Product Name: {name}
+    Description: {description}
+    Price: {price} TL
+    
+    Return JSON with:
+    - category: main category (technology, books, cooking, art, wellness, fitness, outdoor, home, food, experience, gaming, fashion, gardening, beauty, health, kitchen)
+    - target_audience: list of target demographics
+    - gift_occasions: suitable occasions (birthday, mothers_day, fathers_day, christmas, valentines_day, graduation, wedding, anniversary, new_year, housewarming, etc.)
+    - emotional_tags: emotional attributes (relaxing, exciting, practical, luxury, wireless, portable, professional, smart, eco-friendly, digital, rechargeable, etc.)
+    - age_range: [min_age, max_age]
 
 output:
   final_dataset_path: "data/gift_catalog.json"
   user_scenarios_path: "data/user_scenarios.json"
-  num_user_scenarios: 100
+  num_user_scenarios: 10  # Reduced to avoid rate limits

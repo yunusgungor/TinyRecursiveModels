@@ -10,12 +10,12 @@ print("Script starting...")
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
-
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+# Load environment variables from scraping/.env file
+load_dotenv(project_root / "scraping" / ".env")
 
 from scraping.config.config_manager import ConfigurationManager
 from scraping.utils.logger import setup_logger
@@ -26,7 +26,7 @@ from scraping.services.dataset_generator import DatasetGenerator
 from scraping.services.user_scenario_generator import UserScenarioGenerator
 
 
-async def run_pipeline(config_path: str = "../scraping/config/scraping_config.yaml"):
+async def run_pipeline(config_path: str = "scraping/config/scraping_config.yaml"):
     """
     Run the complete scraping pipeline
     

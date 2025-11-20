@@ -92,6 +92,9 @@ class UserScenarioGenerator:
         """
         self.logger.info(f"Generating {num_scenarios} user scenarios...")
         
+        # Get delay from config
+        batch_delay = self.config.get('batch_delay', 5)
+        
         scenarios = []
         
         # Extract real data from catalog
@@ -105,6 +108,10 @@ class UserScenarioGenerator:
         for i in range(num_scenarios):
             if self.enabled and self.request_count < self.max_requests:
                 scenario = await self._generate_ai_scenario(i, categories, tags, occasions, price_ranges)
+                
+                # Wait between AI requests to avoid rate limits
+                if scenario and i < num_scenarios - 1:
+                    await asyncio.sleep(batch_delay)
             else:
                 scenario = self._generate_fallback_scenario(i, categories, tags, occasions, price_ranges)
             

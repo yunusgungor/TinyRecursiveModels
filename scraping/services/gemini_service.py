@@ -264,18 +264,25 @@ class GeminiEnhancementService:
             "age_range": age_range
         }
 
-    async def enhance_batch(self, products: list, batch_size: int = 10) -> list:
+    async def enhance_batch(self, products: list, batch_size: int = None) -> list:
         """
         Enhance a batch of products with parallel processing
         
         Args:
             products: List of RawProductData objects
-            batch_size: Number of products to process in parallel
+            batch_size: Number of products to process in parallel (default from config)
             
         Returns:
             List of enhancement dictionaries
         """
+        # Use config batch_size if not specified
+        if batch_size is None:
+            batch_size = self.config.get('batch_size', 1)
+        
+        batch_delay = self.config.get('batch_delay', 5)
+        
         self.logger.info(f"Starting batch enhancement of {len(products)} products...")
+        self.logger.info(f"Processing {batch_size} product(s) at a time with {batch_delay}s delay")
         
         enhanced = []
         
@@ -298,6 +305,11 @@ class GeminiEnhancementService:
                 f"Enhanced {len(enhanced)}/{len(products)} products "
                 f"({(len(enhanced)/len(products)*100):.1f}%)"
             )
+            
+            # Wait between batches to avoid rate limits
+            if i + batch_size < len(products):
+                self.logger.info(f"Waiting {batch_delay}s before next request...")
+                await asyncio.sleep(batch_delay)
         
         self.logger.info(f"Batch enhancement complete: {len(enhanced)} products enhanced")
         return enhanced
