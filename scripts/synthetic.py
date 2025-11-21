@@ -2,12 +2,14 @@
 """
 Tamamen Öğrenilmiş Sentetik Veri Üretimi
 Tüm bilgiler (isimler, tag'ler, fiyatlar vb.) scraped veriden öğrenilir
+Her çalıştırmada varolan verileri genişletir, duplicate oluşturmaz
 """
 import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from collections import defaultdict
+import hashlib
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -29,10 +31,14 @@ class FullyLearnedSyntheticGenerator:
     def __init__(
         self,
         gift_path: str = "data/gift_catalog.json",
-        user_path: str = "data/user_scenarios.json"
+        user_path: str = "data/user_scenarios.json",
+        output_gift_path: str = "data/fully_learned_synthetic_gifts.json",
+        output_user_path: str = "data/fully_learned_synthetic_users.json"
     ):
         self.gift_path = Path(gift_path)
         self.user_path = Path(user_path)
+        self.output_gift_path = Path(output_gift_path)
+        self.output_user_path = Path(output_user_path)
         self.synthesizers = {}
         
         # Scraped veriden öğrenilecek bilgiler
@@ -46,6 +52,12 @@ class FullyLearnedSyntheticGenerator:
             'relationships': set(),   # Tüm ilişkiler
             'occasions_user': set()   # Kullanıcı occasion'ları
         }
+        
+        # Varolan veriler ve hash'ler
+        self.existing_gifts = []
+        self.existing_users = []
+        self.gift_hashes = set()
+        self.user_hashes = set()
     
     @staticmethod
     def normalize_occasion(occasion: str) -> str:
@@ -55,6 +67,59 @@ class FullyLearnedSyntheticGenerator:
             occasion = occasion.split('(')[0].strip()
         # Küçük harfe çevir ve boşlukları alt çizgiye çevir
         return occasion.lower().replace(' ', '_')
+    
+    @staticmethod
+    def create_gift_hash(gift: dict) -> str:
+        """Hediye için benzersiz hash oluştur"""
+        # Name, category, price, age_range kombinasyonu
+        hash_str = f"{gift['name']}|{gift['category']}|{gift['price']:.2f}|{gift['age_range'][0]}-{gift['age_range'][1]}"
+        return hashlib.md5(hash_str.encode('utf-8')).hexdigest()
+    
+    @staticmethod
+    def create_user_hash(scenario: dict) -> str:
+        """Kullanıcı senaryosu için benzersiz hash oluştur"""
+        profile = scenario['profile']
+        # Age, budget, relationship, occasion, hobbies, preferences kombinasyonu
+        hobbies_str = ','.join(sorted(profile.get('hobbies', [])))
+        prefs_str = ','.join(sorted(profile.get('preferences', [])))
+        hash_str = f"{profile['age']}|{profile['budget']:.2f}|{profile['relationship']}|{profile['occasion']}|{hobbies_str}|{prefs_str}"
+        return hashlib.md5(hash_str.encode('utf-8')).hexdigest()
+    
+    def load_existing_gifts(self):
+        """Varolan hediye verisini yükle"""
+        if not self.output_gift_path.exists():
+            print("  📝 Hediye dosyası yok, ilk kez oluşturulacak")
+            return
+        
+        with open(self.output_gift_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        self.existing_gifts = data.get('gifts', [])
+        
+        # Hash'leri oluştur
+        for gift in self.existing_gifts:
+            gift_hash = self.create_gift_hash(gift)
+            self.gift_hashes.add(gift_hash)
+        
+        print(f"  📦 Varolan {len(self.existing_gifts)} hediye yüklendi")
+    
+    def load_existing_users(self):
+        """Varolan kullanıcı verisini yükle"""
+        if not self.output_user_path.exists():
+            print("  📝 Kullanıcı dosyası yok, ilk kez oluşturulacak")
+            return
+        
+        with open(self.output_user_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        self.existing_users = data.get('scenarios', [])
+        
+        # Hash'leri oluştur
+        for scenario in self.existing_users:
+            user_hash = self.create_user_hash(scenario)
+            self.user_hashes.add(user_hash)
+        
+        print(f"  👥 Varolan {len(self.existing_users)} kullanıcı yüklendi")
     
     def learn_from_scraped_data(self):
         """Scraped veriden tüm bilgileri öğren"""
@@ -421,9 +486,22 @@ class FullyLearnedSyntheticGenerator:
         return df
     
     def save_synthetic_gifts(self, df: pd.DataFrame, output_path: str):
-        """Öğrenilmiş bilgilerle sentetik hediye kaydet"""
+        """Öğrenilmiş bilgilerle sentetik hediye kaydet (duplicate kontrolü ile)"""
         import random
-        gifts = []
+        new_gifts = []
+        duplicates = 0
+        
+        # Varolan en büyük ID'yi bul
+        max_id = 0
+        for gift in self.existing_gifts:
+            if gift['id'].startswith('learned_synth_'):
+                try:
+                    gift_id = int(gift['id'].split('_')[-1])
+                    max_id = max(max_id, gift_id)
+                except:
+                    pass
+        
+        next_id = max_id + 1
         
         for idx, row in df.iterrows():
             category = row['category']
@@ -433,10 +511,8 @@ class FullyLearnedSyntheticGenerator:
             
             # Her zaman gerçek ürün ismini kullan
             if category in self.learned_data['product_names'] and self.learned_data['product_names'][category]:
-                # Önce kendi kategorisinden seç
                 product_name = random.choice(self.learned_data['product_names'][category])
             else:
-                # Eğer o kategoride ürün yoksa, tüm kategorilerden seç
                 all_names = []
                 for cat_names in self.learned_data['product_names'].values():
                     all_names.extend(cat_names)
@@ -462,7 +538,7 @@ class FullyLearnedSyntheticGenerator:
                 selected_occasions = []
             
             gift = {
-                "id": f"learned_synth_{idx:04d}",
+                "id": f"learned_synth_{next_id:04d}",
                 "name": product_name,
                 "category": category,
                 "price": round(price, 2),
@@ -471,12 +547,23 @@ class FullyLearnedSyntheticGenerator:
                 "tags": selected_tags,
                 "occasions": selected_occasions
             }
-            gifts.append(gift)
+            
+            # Duplicate kontrolü
+            gift_hash = self.create_gift_hash(gift)
+            if gift_hash not in self.gift_hashes:
+                self.gift_hashes.add(gift_hash)
+                new_gifts.append(gift)
+                next_id += 1
+            else:
+                duplicates += 1
+        
+        # Varolan ve yeni verileri birleştir
+        all_gifts = self.existing_gifts + new_gifts
         
         output_data = {
-            "gifts": gifts,
+            "gifts": all_gifts,
             "metadata": {
-                "total_gifts": len(gifts),
+                "total_gifts": len(all_gifts),
                 "source": "Fully Learned SDV Synthetic from Scraped Data",
                 "quality_level": "learned_and_validated",
                 "learned_from": str(self.gift_path)
@@ -487,11 +574,27 @@ class FullyLearnedSyntheticGenerator:
             json.dump(output_data, f, indent=2, ensure_ascii=False)
         
         print(f"  💾 Kaydedildi: {output_path}")
+        print(f"  ✨ Yeni eklenen: {len(new_gifts)}")
+        print(f"  🔄 Duplicate atlandı: {duplicates}")
+        print(f"  📊 Toplam hediye: {len(all_gifts)}")
     
     def save_synthetic_users(self, df: pd.DataFrame, output_path: str):
-        """Öğrenilmiş bilgilerle sentetik kullanıcı kaydet"""
+        """Öğrenilmiş bilgilerle sentetik kullanıcı kaydet (duplicate kontrolü ile)"""
         import random
-        scenarios = []
+        new_scenarios = []
+        duplicates = 0
+        
+        # Varolan en büyük ID'yi bul
+        max_id = 0
+        for scenario in self.existing_users:
+            if scenario['id'].startswith('learned_scenario_'):
+                try:
+                    scenario_id = int(scenario['id'].split('_')[-1])
+                    max_id = max(max_id, scenario_id)
+                except:
+                    pass
+        
+        next_id = max_id + 1
         
         for idx, row in df.iterrows():
             num_hobbies = min(int(row['num_hobbies']), 4)
@@ -524,7 +627,7 @@ class FullyLearnedSyntheticGenerator:
             ) if self.learned_data['expected_tools'] else []
             
             scenario = {
-                "id": f"learned_scenario_{idx:04d}",
+                "id": f"learned_scenario_{next_id:04d}",
                 "profile": {
                     "age": int(row['age']),
                     "budget": round(float(row['budget']), 2),
@@ -536,12 +639,23 @@ class FullyLearnedSyntheticGenerator:
                 "expected_categories": selected_categories,
                 "expected_tools": selected_tools
             }
-            scenarios.append(scenario)
+            
+            # Duplicate kontrolü
+            user_hash = self.create_user_hash(scenario)
+            if user_hash not in self.user_hashes:
+                self.user_hashes.add(user_hash)
+                new_scenarios.append(scenario)
+                next_id += 1
+            else:
+                duplicates += 1
+        
+        # Varolan ve yeni verileri birleştir
+        all_scenarios = self.existing_users + new_scenarios
         
         output_data = {
-            "scenarios": scenarios,
+            "scenarios": all_scenarios,
             "metadata": {
-                "total_scenarios": len(scenarios),
+                "total_scenarios": len(all_scenarios),
                 "source": "Fully Learned SDV Synthetic from User Data",
                 "quality_level": "learned_and_validated",
                 "learned_from": str(self.user_path)
@@ -552,6 +666,9 @@ class FullyLearnedSyntheticGenerator:
             json.dump(output_data, f, indent=2, ensure_ascii=False)
         
         print(f"  💾 Kaydedildi: {output_path}")
+        print(f"  ✨ Yeni eklenen: {len(new_scenarios)}")
+        print(f"  🔄 Duplicate atlandı: {duplicates}")
+        print(f"  📊 Toplam kullanıcı: {len(all_scenarios)}")
 
 
 def main():
@@ -567,11 +684,18 @@ def main():
     print("  • Occasion'lar")
     print("  • Fiyat aralıkları")
     print("  • Hobiler ve tercihler")
+    print("🔄 Varolan verileri genişletir, duplicate oluşturmaz")
     print("=" * 60)
     
     generator = FullyLearnedSyntheticGenerator()
     
+    # Varolan verileri yükle
+    print("\n📂 Varolan veriler kontrol ediliyor...")
+    generator.load_existing_gifts()
+    generator.load_existing_users()
+    
     # Önce öğren
+    print("\n�  Scraped veriden öğreniliyor...")
     generator.learn_from_scraped_data()
     
     # Veri yükle
@@ -582,10 +706,10 @@ def main():
     users_df = generator.load_and_clean_users()
     
     # Eğit
-    print("\n🎓 Hediye synthesizer eğitiliyor...")
+    print("\n� Hediyei synthesizer eğitiliyor...")
     generator.train_synthesizer(gifts_df, 'gifts')
     
-    print("\n🎓 Kullanıcı synthesizer eğitiliyor...")
+    print("\n� Kullanıkcı synthesizer eğitiliyor...")
     generator.train_synthesizer(users_df, 'users')
     
     # Üret
@@ -595,17 +719,18 @@ def main():
     print("\n🎲 Sentetik kullanıcı verisi üretiliyor...")
     synthetic_users = generator.generate_synthetic_data(users_df, 'users', num_samples=300)
     
-    # Kaydet
+    # Kaydet (duplicate kontrolü ile)
     print("\n💾 Öğrenilmiş sentetik veriler kaydediliyor...")
-    generator.save_synthetic_gifts(synthetic_gifts, "data/fully_learned_synthetic_gifts.json")
-    generator.save_synthetic_users(synthetic_users, "data/fully_learned_synthetic_users.json")
+    generator.save_synthetic_gifts(synthetic_gifts, str(generator.output_gift_path))
+    generator.save_synthetic_users(synthetic_users, str(generator.output_user_path))
     
     print("\n" + "=" * 60)
     print("✅ Tamamen öğrenilmiş sentetik veri üretimi tamamlandı!")
-    print("\n📁 Üretilen dosyalar:")
+    print("\n📁 Güncellenmiş dosyalar:")
     print("  • data/fully_learned_synthetic_gifts.json")
     print("  • data/fully_learned_synthetic_users.json")
     print("\n🎯 Tüm bilgiler scraped veriden öğrenildi!")
+    print("🔒 Duplicate veriler engellendi!")
 
 
 if __name__ == "__main__":

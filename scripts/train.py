@@ -18,7 +18,7 @@ from typing import Dict, List, Any, Tuple
 import json
 
 # Add project root to path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.tools.integrated_enhanced_trm import IntegratedEnhancedTRM, create_integrated_enhanced_config
 from models.rl.environment import GiftRecommendationEnvironment, UserProfile, GiftItem
