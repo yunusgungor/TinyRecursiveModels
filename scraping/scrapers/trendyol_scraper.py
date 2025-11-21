@@ -32,11 +32,26 @@ class TrendyolScraper(BaseScraper):
         ]
     }
     
+    # Category to search URL mapping
+    CATEGORY_URLS = {
+        'elektronik': 'https://www.trendyol.com/sr?wc=104024&sst=BEST_SELLER',
+        'ev-yasam': 'https://www.trendyol.com/sr?wc=1354,94,1365,95,101514,104166,104216&sst=BEST_SELLER',
+        'kozmetik': 'https://www.trendyol.com/sr?wc=86,1180,109363,143992,1346,143835,1347&sst=BEST_SELLER',
+        'kadin-giyim': 'https://www.trendyol.com/sr?wc=82&wg=1&sst=BEST_SELLER',
+        'erkek-giyim': 'https://www.trendyol.com/sr?wc=82&wg=2&sst=BEST_SELLER',
+        'anne-cocuk': 'https://www.trendyol.com/sr?wc=83&sst=BEST_SELLER',
+        'ayakkabi-canta': 'https://www.trendyol.com/sr?wc=1,2&sst=BEST_SELLER',
+        'supermarket': 'https://www.trendyol.com/sr?wc=103799&sst=BEST_SELLER',
+        'mobilya': 'https://www.trendyol.com/sr?wc=1119&sst=BEST_SELLER',
+        'spor-outdoor': 'https://www.trendyol.com/sr?wc=73,1172,120,101484,119,101426,110,1181,144727,115,1174,66,111,101457,103687,104224,1020,65&sst=BEST_SELLER',
+        'kitap-kirtasiye': 'https://www.trendyol.com/sr?wc=97,91,104125,105777,108934&sst=BEST_SELLER'
+    }
+    
     def __init__(self, config: Dict[str, Any], rate_limiter):
         """Initialize Trendyol scraper"""
         super().__init__(config, rate_limiter)
         self.base_url = config.get('url', 'https://www.trendyol.com')
-        self.categories = config.get('categories', ['ev-yasam'])
+        self.categories = config.get('categories', ['elektronik'])
         self.max_products = config.get('max_products', 500)
     
     async def scrape_products(self, max_products: int) -> List[Dict[str, Any]]:
@@ -62,7 +77,12 @@ class TrendyolScraper(BaseScraper):
         page = await self.create_page()
         
         try:
-            category_url = f"{self.base_url}/{category}"
+            # Get category URL from mapping
+            category_url = self.CATEGORY_URLS.get(category)
+            if not category_url:
+                self.logger.error(f"Unknown category: {category}")
+                return products
+            
             success = await self.safe_goto(page, category_url)
             if not success:
                 self.logger.error(f"Failed to load category: {category}")
@@ -96,8 +116,10 @@ class TrendyolScraper(BaseScraper):
         """Extract product URLs from category listing page"""
         urls = []
         current_page = 1
+        max_retries = 3  # Limit retry attempts
+        retry_count = 0
         
-        while len(urls) < max_urls:
+        while len(urls) < max_urls and retry_count < max_retries:
             try:
                 # Scroll down to trigger lazy loading
                 for _ in range(5):
@@ -117,10 +139,14 @@ class TrendyolScraper(BaseScraper):
                 if not found_selector:
                     # Try waiting for the primary one as a fallback
                     try:
-                        await page.wait_for_selector(self.SELECTORS['product_list'], timeout=10000)
+                        await page.wait_for_selector(self.SELECTORS['product_list'], timeout=15000)
                         found_selector = self.SELECTORS['product_list']
                     except:
-                        self.logger.warning("Timeout waiting for product list, trying to scroll more...")
+                        retry_count += 1
+                        self.logger.warning(f"Timeout waiting for product list (attempt {retry_count}/{max_retries})")
+                        if retry_count >= max_retries:
+                            self.logger.error(f"Failed to find products after {max_retries} attempts. Category may be blocked or selectors outdated.")
+                            break
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                         await asyncio.sleep(2)
                         continue

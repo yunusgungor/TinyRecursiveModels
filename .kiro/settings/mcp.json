@@ -31,7 +31,11 @@
       "args": [
         "@browsermcp/mcp@latest"
       ],
-      "disabled": false
+      "disabled": false,
+      "autoApprove": [
+        "browser_navigate",
+        "browser_click"
+      ]
     }
   }
 }

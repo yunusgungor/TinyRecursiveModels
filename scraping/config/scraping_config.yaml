@@ -5,6 +5,16 @@ scraping:
       max_products: 100
       categories:
         - "elektronik"
+        - "ev-yasam"
+        - "kozmetik"
+        - "kadin-giyim"
+        - "erkek-giyim"
+        - "anne-cocuk"
+        - "ayakkabi-canta"
+        - "supermarket"
+        - "mobilya"
+        - "spor-outdoor"
+        - "kitap-kirtasiye"
 
 rate_limit:
   requests_per_minute: 10
