@@ -379,20 +379,28 @@ Return ONLY valid JSON:
         
         budget = profile.get('budget', 100)
         preferences = profile.get('preferences', [])
+        hobbies = profile.get('hobbies', [])
         
         # Budget-based tools
         if budget < 100:
             tools.append('budget_optimizer')
         
-        # Always useful tools
-        tools.extend(['review_analysis', 'price_comparison'])
+        # Always useful tools - TÜM 4 ARACI EKLE
+        tools.extend(['review_analysis', 'price_comparison', 'inventory_check', 'trend_analyzer'])
         
-        # Preference-based tools
-        if any(p in ['trendy', 'tech-savvy'] for p in preferences):
-            tools.append('trend_analysis')
+        # Preference-based tools (ek olarak)
+        if any(p in ['trendy', 'tech-savvy', 'modern', 'innovative'] for p in preferences + hobbies):
+            # trend_analyzer zaten eklendi, tekrar eklemeye gerek yok
+            pass
         
-        if any(p in ['luxury', 'premium'] for p in preferences):
-            tools.append('price_comparison')
+        if any(p in ['luxury', 'premium', 'expensive'] for p in preferences + hobbies):
+            # price_comparison zaten eklendi
+            pass
+        
+        # Stok kontrolü önemli olan kategoriler için
+        if any(p in ['technology', 'electronics', 'digital', 'smart'] for p in preferences + hobbies):
+            # inventory_check zaten eklendi
+            pass
         
         return list(set(tools))
 

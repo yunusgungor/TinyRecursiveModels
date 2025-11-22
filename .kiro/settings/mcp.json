@@ -34,7 +34,8 @@
       "disabled": false,
       "autoApprove": [
         "browser_navigate",
-        "browser_click"
+        "browser_click",
+        "browser_screenshot"
       ]
     }
   }

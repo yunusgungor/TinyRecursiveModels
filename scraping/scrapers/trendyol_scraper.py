@@ -14,15 +14,15 @@ from .base_scraper import BaseScraper
 class TrendyolScraper(BaseScraper):
     """Scraper for trendyol.com"""
     
-    # Site-specific selectors (to be updated based on actual site structure)
+    # Site-specific selectors (UPDATED with Browser MCP findings - 2025-01-22)
     SELECTORS = {
         'product_list': '.p-card-wrppr',
         'product_link': '.p-card-wrppr a',
-        'product_name': 'h1',  # Updated: class pr-new-br no longer used
+        'product_name': 'h1',
         'product_price': 'div.product-price-container span.prc-dsc',
         'product_description': 'div.detail-border-container',
         'product_image': 'div.gallery-container img.ph-gl-img',
-        'product_rating': 'div.pr-rnr-sm-p > span',
+        'product_rating': 'div.pr-in-w span',  # UPDATED: Ürün bilgi wrapper içindeki span
         'next_page': 'a.ty-page-i.ty-page-i-next',
         'product_card_alternatives': [
             '.p-card-wrppr',
@@ -255,12 +255,52 @@ class TrendyolScraper(BaseScraper):
                 img_element = await page.query_selector('img.ph-gl-img, .gallery img, .product-image img')
             image_url = await img_element.get_attribute('src') if img_element else None
             
-            # Extract rating
+            # Extract rating - UPDATED selectors from Browser MCP findings
             rating = 0.0
-            rating_element = await page.query_selector(self.SELECTORS['product_rating'])
-            if rating_element:
-                rating_text = await rating_element.inner_text()
-                rating = self._parse_rating(rating_text)
+            rating_selectors = [
+                'div.pr-in-w span',  # PRIMARY: Ürün bilgi wrapper (Browser MCP verified)
+                'span.pr-in-sp',  # Product info span
+                'div[class*="rating"] span',  # Rating içeren div
+                'a[href*="yorumlar"] ~ span',  # Yorumlar linkinin kardeş span'ı
+                '[data-rating]',  # Data attribute
+                'span[class*="rating"]'  # Any class containing "rating"
+            ]
+            
+            for rating_selector in rating_selectors:
+                try:
+                    rating_element = await page.query_selector(rating_selector)
+                    if rating_element:
+                        rating_text = await rating_element.inner_text()
+                        rating = self._parse_rating(rating_text)
+                        if rating > 0:
+                            self.logger.debug(f"Found rating {rating} using selector: {rating_selector}")
+                            break
+                except:
+                    continue
+            
+            # If still no rating, try to extract from page content (UPDATED patterns)
+            if rating == 0:
+                try:
+                    page_content = await page.content()
+                    # UPDATED: More comprehensive patterns from Browser MCP analysis
+                    import re
+                    rating_patterns = [
+                        r'"ratingScore":\s*(\d+\.?\d*)',  # JSON data
+                        r'rating["\s:]+(\d+[.,]\d+)',  # rating: 4.4
+                        r'(\d+[.,]\d+)\s*\/\s*5',  # 4.4 / 5
+                        r'(\d+[.,]\d+)\s*yıldız',  # 4.4 yıldız
+                        r'(\d+[.,]\d+)\s*puan',  # 4.4 puan
+                        r'(\d+[.,]\d+)\s*Değerlendirme',  # 4.4 Değerlendirme (Trendyol specific)
+                    ]
+                    for pattern in rating_patterns:
+                        match = re.search(pattern, page_content, re.IGNORECASE)
+                        if match:
+                            rating = self._parse_rating(match.group(1))
+                            if rating > 0:
+                                self.logger.debug(f"Found rating {rating} from page content using pattern: {pattern}")
+                                break
+                except:
+                    pass
             
             product_data = {
                 'source': 'trendyol',

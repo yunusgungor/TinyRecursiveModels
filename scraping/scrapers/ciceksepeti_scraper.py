@@ -198,12 +198,47 @@ class CicekSepetiScraper(BaseScraper):
             img_element = await page.query_selector(self.SELECTORS['product_image'])
             image_url = await img_element.get_attribute('src') if img_element else None
             
-            # Extract rating
-            rating_element = await page.query_selector(self.SELECTORS['product_rating'])
+            # Extract rating - try multiple selectors
             rating = 0.0
-            if rating_element:
-                rating_text = await rating_element.inner_text()
-                rating = self._parse_rating(rating_text)
+            rating_selectors = [
+                '.product-rating',
+                'span.rating',
+                'div.rating span',
+                '[data-rating]',
+                'span[class*="rating"]',
+                '.review-score'
+            ]
+            
+            for rating_selector in rating_selectors:
+                try:
+                    rating_element = await page.query_selector(rating_selector)
+                    if rating_element:
+                        rating_text = await rating_element.inner_text()
+                        rating = self._parse_rating(rating_text)
+                        if rating > 0:
+                            self.logger.debug(f"Found rating {rating} using selector: {rating_selector}")
+                            break
+                except:
+                    continue
+            
+            # If still no rating, try page content
+            if rating == 0:
+                try:
+                    page_content = await page.content()
+                    import re
+                    rating_patterns = [
+                        r'rating["\s:]+(\d+[.,]\d+)',
+                        r'(\d+[.,]\d+)\s*\/\s*5',
+                        r'(\d+[.,]\d+)\s*yıldız'
+                    ]
+                    for pattern in rating_patterns:
+                        match = re.search(pattern, page_content, re.IGNORECASE)
+                        if match:
+                            rating = self._parse_rating(match.group(1))
+                            if rating > 0:
+                                break
+                except:
+                    pass
             
             # Build product data
             product_data = {

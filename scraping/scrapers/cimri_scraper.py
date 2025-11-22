@@ -274,12 +274,47 @@ class CimriScraper(BaseScraper):
                 if not image_url:
                     image_url = await img_element.get_attribute('data-src')
             
-            # Extract rating if available
-            rating_element = await page.query_selector(self.SELECTORS['detail_rating'])
+            # Extract rating - try multiple selectors
             rating = 0.0
-            if rating_element:
-                rating_text = await rating_element.inner_text()
-                rating = self._parse_rating(rating_text)
+            rating_selectors = [
+                'span.rating',
+                'div.rating',
+                'span.rating-score',
+                '[data-rating]',
+                'span[class*="rating"]',
+                '.product-rating'
+            ]
+            
+            for rating_selector in rating_selectors:
+                try:
+                    rating_element = await page.query_selector(rating_selector)
+                    if rating_element:
+                        rating_text = await rating_element.inner_text()
+                        rating = self._parse_rating(rating_text)
+                        if rating > 0:
+                            self.logger.debug(f"Found rating {rating} using selector: {rating_selector}")
+                            break
+                except:
+                    continue
+            
+            # If still no rating, try page content
+            if rating == 0:
+                try:
+                    page_content = await page.content()
+                    import re
+                    rating_patterns = [
+                        r'rating["\s:]+(\d+[.,]\d+)',
+                        r'(\d+[.,]\d+)\s*\/\s*5',
+                        r'(\d+[.,]\d+)\s*yıldız'
+                    ]
+                    for pattern in rating_patterns:
+                        match = re.search(pattern, page_content, re.IGNORECASE)
+                        if match:
+                            rating = self._parse_rating(match.group(1))
+                            if rating > 0:
+                                break
+                except:
+                    pass
             
             # Extract available stores
             store_elements = await page.query_selector_all('img[alt]')
