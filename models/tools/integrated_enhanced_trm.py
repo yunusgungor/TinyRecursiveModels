@@ -570,24 +570,27 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
             tool_context, tool_context, tool_context
         )
         
-        # Get tool diversity scores
-        tool_scores_raw = self.tool_diversity_head(tool_attended.squeeze(1))
+        # Get tool diversity scores (already has softmax, outputs sum to 1)
+        tool_scores = self.tool_diversity_head(tool_attended.squeeze(1))
         
-        # Apply sigmoid to normalize scores to [0, 1]
-        tool_scores = torch.sigmoid(tool_scores_raw)
-        
-        # Select tools with threshold (only select if score > 0.5)
+        # Select tools with threshold (lowered for softmax distribution)
+        # With 5 tools, average score is 0.2, so threshold of 0.15 allows selection
         tool_names = list(self.tool_registry.list_tools())
         selected_tools = []
+        threshold = 0.15  # Lowered from 0.5 to work with softmax probabilities
         
         for batch_idx in range(tool_scores.size(0)):
             batch_tools = []
             # Get scores for this batch
             batch_scores = tool_scores[batch_idx]
             
-            # Select tools above threshold, up to max_tool_calls_per_step
-            for tool_idx, score in enumerate(batch_scores):
-                if score > 0.5 and tool_idx < len(tool_names):
+            # Select top scoring tools above threshold, up to max_tool_calls_per_step
+            # Sort by score descending
+            sorted_indices = torch.argsort(batch_scores, descending=True)
+            
+            for tool_idx in sorted_indices:
+                score = batch_scores[tool_idx]
+                if score > threshold and tool_idx < len(tool_names):
                     batch_tools.append(tool_names[tool_idx])
                     if len(batch_tools) >= self.enhanced_config.max_tool_calls_per_step:
                         break
@@ -702,19 +705,22 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
                     tool_params[tool_name] = {'budget': budget_param.item()}
                 
                 elif tool_name == 'review_analysis':
-                    # Generate minimum rating threshold
-                    min_rating = torch.sigmoid(param_encoding[1]) * 5.0  # 0-5 range
-                    tool_params[tool_name] = {'min_rating': min_rating.item()}
+                    # ReviewAnalysisTool only accepts: product_id, max_reviews, language, gifts
+                    # No min_rating parameter - gifts will be filtered by the tool itself
+                    max_reviews = int(torch.sigmoid(param_encoding[1]) * 200.0)  # 0-200 range
+                    tool_params[tool_name] = {'max_reviews': max(10, max_reviews)}
                 
                 elif tool_name == 'inventory_check':
-                    # Generate availability threshold
-                    availability_threshold = torch.sigmoid(param_encoding[2])
-                    tool_params[tool_name] = {'threshold': availability_threshold.item()}
+                    # InventoryCheckTool accepts: gifts parameter only
+                    tool_params[tool_name] = {}  # No additional parameters needed
                 
                 elif tool_name == 'trend_analyzer':
-                    # Generate trend window parameter
-                    trend_window = torch.sigmoid(param_encoding[3]) * 30.0  # 0-30 days
-                    tool_params[tool_name] = {'window_days': int(trend_window.item())}
+                    # TrendAnalysisTool accepts: category, time_period, region, gifts, user_age
+                    # Generate time period (7d, 30d, 90d, 1y)
+                    time_periods = ['7d', '30d', '90d', '1y']
+                    period_idx = int(torch.sigmoid(param_encoding[3]) * len(time_periods))
+                    period_idx = min(period_idx, len(time_periods) - 1)
+                    tool_params[tool_name] = {'time_period': time_periods[period_idx]}
         
         # Encode available gifts
         gift_encodings = self.gift_feature_encoder(self.gift_features[:len(available_gifts)].to(device))
@@ -1000,8 +1006,8 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
                     budget_param = torch.sigmoid(param_encoding[0]) * 500.0
                     tool_params_dict = {'budget': budget_param.item()}
                 elif tool_name == 'review_analysis':
-                    min_rating = torch.sigmoid(param_encoding[1]) * 5.0
-                    tool_params_dict = {'min_rating': min_rating.item()}
+                    max_reviews = int(torch.sigmoid(param_encoding[1]) * 200.0)
+                    tool_params_dict = {'max_reviews': max(10, max_reviews)}
             
             # Execute tool
             try:

@@ -259,7 +259,7 @@ class IntegratedEnhancedTrainer:
         
         # Add learning rate scheduler with moderate reduction
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-6, verbose=True
+            optimizer, mode='min', factor=0.5, patience=8, min_lr=1e-6, verbose=True
         )
         
         return optimizer
@@ -1028,12 +1028,12 @@ class IntegratedEnhancedTrainer:
         print(f"📚 Curriculum learning enabled with {len(self.available_tools_by_stage)} stages")
         
         for epoch in range(start_epoch, num_epochs):
-            # Update curriculum stage based on epoch (accelerated progression)
-            if epoch < 10:
+            # Update curriculum stage based on epoch (slower progression for better stability)
+            if epoch < 15:
                 self.curriculum_stage = 0
-            elif epoch < 25:
+            elif epoch < 35:
                 self.curriculum_stage = 1
-            elif epoch < 45:
+            elif epoch < 60:
                 self.curriculum_stage = 2
             else:
                 self.curriculum_stage = 3
@@ -1172,21 +1172,21 @@ def main():
         'batch_size': args.batch_size,
         'num_epochs': args.epochs,
         'eval_frequency': 5,  # More frequent evaluation
-        'early_stopping_patience': 25,  # Even more patience
-        'user_profile_lr': 1.2e-4,  # Increased from 5e-5
-        'category_matching_lr': 1.5e-4,  # SIGNIFICANTLY increased from 4e-5
-        'tool_selection_lr': 2e-4,  # Increased from 8e-5
-        'reward_prediction_lr': 2.5e-4,  # Increased from 1.5e-4
-        'main_lr': 1.2e-4,  # Increased from 5e-5
-        'weight_decay': 0.015,  # Reduced from 0.025 (less aggressive)
-        'category_loss_weight': 0.25,  # Reduced from 0.30 (already perfect at 100%)
-        'tool_diversity_loss_weight': 0.20,  # Kept same
-        'tool_execution_loss_weight': 0.40,  # INCREASED from 0.25 (main focus!)
-        'reward_loss_weight': 0.10,  # Reduced from 0.20 (make room for execution)
-        'semantic_matching_loss_weight': 0.10,  # Kept same
-        'embedding_reg_weight': 1.5e-5,  # Kept same
-        'tool_encoder_lr': 2e-4,  # Kept same
-        'hidden_dim': 128  # Hidden dimension for tool encoder
+        'early_stopping_patience': 40,  # Increased patience to allow for recovery
+        'user_profile_lr': 1.2e-4,
+        'category_matching_lr': 2.0e-4,  # Increased to help category convergence
+        'tool_selection_lr': 2e-4,
+        'reward_prediction_lr': 2.5e-4,
+        'main_lr': 1.2e-4,
+        'weight_decay': 0.015,
+        'category_loss_weight': 0.35,  # Increased to stabilize category prediction
+        'tool_diversity_loss_weight': 0.20,
+        'tool_execution_loss_weight': 0.30,  # Slightly reduced to balance with category
+        'reward_loss_weight': 0.15,  # Slightly increased
+        'semantic_matching_loss_weight': 0.10,
+        'embedding_reg_weight': 1.5e-5,
+        'tool_encoder_lr': 2e-4,
+        'hidden_dim': 128
     })
     
     # Initialize trainer
