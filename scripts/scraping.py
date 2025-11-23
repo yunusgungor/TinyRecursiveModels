@@ -57,15 +57,31 @@ async def run_pipeline(config_path: str = "scraping/config/scraping_config.yaml"
         orchestrator = ScrapingOrchestrator(config_manager)
         orchestrator.initialize_scrapers()
         
-        # AI Enhancement Service (Gemini or Ollama)
+        # AI Enhancement Service (Cerebras, Ollama, or Gemini)
         gemini_config = config_manager.get_gemini_config()
         ollama_config = config_manager.get_all_config().get('ollama', {})
+        cerebras_config = config_manager.get_all_config().get('cerebras', {})
         
-        if ollama_config.get('enabled', False):
+        # Priority: Cerebras > Ollama > Gemini
+        if cerebras_config.get('enabled', False):
+            import os
+            api_key_env = cerebras_config.get('api_key_env', 'CEREBRAS_API_KEY')
+            api_key = os.getenv(api_key_env)
+            
+            if api_key and api_key != 'your_cerebras_api_key_here':
+                from scraping.services.cerebras_service import CerebrasEnhancementService
+                cerebras_config['api_key'] = api_key
+                logger.info(f"Using Cerebras for enhancement (Model: {cerebras_config.get('model', 'llama3.1-8b')})")
+                enhancement_service = CerebrasEnhancementService(cerebras_config)
+            else:
+                logger.warning("Cerebras enabled but API key not found. Falling back to next provider.")
+                cerebras_config['enabled'] = False
+        
+        if not cerebras_config.get('enabled', False) and ollama_config.get('enabled', False):
             from scraping.services.ollama_service import OllamaEnhancementService
             logger.info(f"Using Ollama for enhancement (Model: {ollama_config.get('model', 'default')})")
             enhancement_service = OllamaEnhancementService(ollama_config)
-        else:
+        elif not cerebras_config.get('enabled', False):
             from scraping.services.gemini_service import GeminiEnhancementService
             logger.info("Using Gemini for enhancement")
             enhancement_service = GeminiEnhancementService(gemini_config)
