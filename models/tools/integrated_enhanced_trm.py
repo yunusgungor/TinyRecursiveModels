@@ -446,8 +446,12 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         """Extract numerical features from gift data"""
         features = []
         
-        # Price (normalized)
-        features.append(min(1.0, gift.get('price', 50.0) / 200.0))
+        # Price (normalized) - safely parse
+        try:
+            price = float(gift.get('price', 50.0))
+        except (ValueError, TypeError):
+            price = 50.0
+        features.append(min(1.0, price / 200.0))
         
         # Rating (normalized)
         features.append(gift.get('rating', 4.0) / 5.0)
@@ -457,9 +461,16 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         category_vector = [1.0 if cat == category else 0.0 for cat in self.gift_categories]
         features.extend(category_vector)
         
-        # Age range (normalized)
+        # Age range (normalized) - safely parse
         age_range = gift.get('age_range', gift.get('age_suitability', [18, 65]))
-        features.extend([age_range[0] / 100.0, age_range[1] / 100.0])
+        if not isinstance(age_range, (list, tuple)) or len(age_range) != 2:
+            age_range = [18, 65]  # Default if invalid
+        try:
+            age_min = float(age_range[0])
+            age_max = float(age_range[1])
+        except (ValueError, TypeError, IndexError):
+            age_min, age_max = 18.0, 65.0
+        features.extend([age_min / 100.0, age_max / 100.0])
         
         # Tags encoding (simplified)
         tags = gift.get('tags', [])

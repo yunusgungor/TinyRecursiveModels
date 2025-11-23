@@ -131,16 +131,32 @@ class GiftRecommendationEnvironment:
             gift_list = data if isinstance(data, list) else data.get('gifts', data)
             
             for item in gift_list:
+                # Safely parse age_range/age_suitability
+                age_range = item.get('age_suitability', item.get('age_range', [18, 65]))
+                if not isinstance(age_range, (list, tuple)) or len(age_range) != 2:
+                    age_range = [18, 65]  # Default if invalid
+                
+                # Safely parse price
+                try:
+                    price = float(item['price'])
+                except (ValueError, TypeError):
+                    price = 0.0  # Default if invalid
+                
+                # Safely parse occasions
+                occasions = item.get('occasion_fit', item.get('occasions', ['any']))
+                if not isinstance(occasions, list):
+                    occasions = ['any']
+                
                 gift = GiftItem(
                     id=item['id'],
                     name=item['name'],
                     category=item['category'],
-                    price=item['price'],
+                    price=price,
                     rating=item['rating'],
                     tags=item['tags'],
                     description=item.get('description', f"{item['name']} - {item['category']} item"),
-                    age_suitability=tuple(item.get('age_suitability', item.get('age_range', [18, 65]))),
-                    occasion_fit=item.get('occasion_fit', item.get('occasions', ['any']))
+                    age_suitability=tuple(age_range),
+                    occasion_fit=occasions
                 )
                 gifts.append(gift)
             
