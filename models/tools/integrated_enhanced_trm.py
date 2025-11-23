@@ -68,9 +68,10 @@ class IntegratedEnhancedTRMConfig(RLTRMConfig):
 class IntegratedEnhancedTRM(RLEnhancedTRM):
     """TRM model with all enhancements integrated into the architecture"""
     
-    def __init__(self, config_dict: dict):
+    def __init__(self, config_dict: dict, verbose: bool = False):
         super().__init__(config_dict)
         self.enhanced_config = IntegratedEnhancedTRMConfig(**config_dict)
+        self._verbose = verbose  # Enable/disable tool execution logging
         
         # Load dynamic categories from dataset FIRST
         self._load_dynamic_categories()
@@ -672,8 +673,20 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         return final_rewards
     
     def forward_with_enhancements(self, carry, env_state: EnvironmentState, 
-                                available_gifts: List[GiftItem]) -> Tuple[Any, Dict[str, torch.Tensor], List[str]]:
-        """Forward pass with all enhancements integrated, including tool feedback and parameters"""
+                                available_gifts: List[GiftItem], 
+                                execute_tools: bool = True) -> Tuple[Any, Dict[str, torch.Tensor], List[str]]:
+        """
+        Forward pass with all enhancements integrated, including tool feedback and parameters
+        
+        Args:
+            carry: Carry state from previous step
+            env_state: Current environment state
+            available_gifts: List of available gift items
+            execute_tools: If True, automatically execute selected tools (default: True)
+            
+        Returns:
+            Tuple of (carry, rl_output, selected_tools)
+        """
         device = next(self.parameters()).device
         
         # Encode user profile
@@ -773,14 +786,67 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         # Generate final recommendations
         recommendation_probs = self.recommendation_head(fused_representation.squeeze(1))
         
-        # Prepare outputs with tool parameters
+        # 🔧 AUTOMATIC TOOL EXECUTION
+        tool_results = {}
+        executed_tools = []
+        
+        if execute_tools and selected_tools and len(selected_tools) > 0:
+            tools_list = selected_tools[0] if selected_tools else []
+            
+            for tool_name in tools_list:
+                if tool_name in tool_params:
+                    try:
+                        # Prepare tool call parameters
+                        call_params = tool_params[tool_name].copy()
+                        call_params['gifts'] = available_gifts
+                        
+                        # Add user-specific parameters
+                        if tool_name == 'trend_analyzer':
+                            call_params['user_age'] = env_state.user_profile.age
+                        
+                        # Execute the tool
+                        result = self.tool_registry.call_tool_by_name(tool_name, **call_params)
+                        
+                        if result.success:
+                            tool_results[tool_name] = result.result
+                            executed_tools.append(tool_name)
+                            
+                            # Log tool execution (optional, can be disabled in production)
+                            if hasattr(self, '_verbose') and self._verbose:
+                                print(f"   ✅ Executed tool: {tool_name}")
+                                print(f"      Time: {result.execution_time:.3f}s")
+                        else:
+                            if hasattr(self, '_verbose') and self._verbose:
+                                print(f"   ⚠️  Tool {tool_name} failed: {result.error}")
+                    
+                    except Exception as e:
+                        if hasattr(self, '_verbose') and self._verbose:
+                            print(f"   ❌ Error executing {tool_name}: {e}")
+                        continue
+            
+            # Encode tool results and update carry state for potential second pass
+            if tool_results:
+                # Combine all tool results into a single encoding
+                all_results = {k: v for k, v in tool_results.items()}
+                tool_feedback_encoding = self.encode_tool_result(all_results)
+                
+                # Update carry state with tool feedback
+                if not isinstance(carry, dict):
+                    carry = {'state': carry}
+                carry['tool_feedback'] = tool_feedback_encoding
+                carry['tool_results'] = tool_results
+                carry['executed_tools'] = executed_tools
+        
+        # Prepare outputs with tool parameters and results
         rl_output = {
             "action_probs": recommendation_probs,
             "value_estimates": predicted_rewards.mean(dim=-1, keepdim=True),
             "category_scores": category_scores,
             "tool_scores": tool_scores,
             "predicted_rewards": predicted_rewards,
-            "tool_params": tool_params  # NEW: Tool parameters for execution
+            "tool_params": tool_params,
+            "tool_results": tool_results,  # NEW: Actual tool execution results
+            "executed_tools": executed_tools  # NEW: List of successfully executed tools
         }
         
         return carry, rl_output, selected_tools[0] if selected_tools else []

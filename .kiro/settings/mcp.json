@@ -35,7 +35,9 @@
       "autoApprove": [
         "browser_navigate",
         "browser_click",
-        "browser_screenshot"
+        "browser_screenshot",
+        "browser_snapshot",
+        "browser_type"
       ]
     }
   }

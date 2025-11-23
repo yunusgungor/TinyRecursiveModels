@@ -154,7 +154,7 @@ class IntegratedEnhancedTrainer:
         gift_catalog_path = "data/fully_learned_synthetic_gifts.json" if use_synthetic_data else "data/gift_catalog.json"
         self.env = GiftRecommendationEnvironment(gift_catalog_path)
         
-        # Curriculum learning settings - SLOWER PROGRESSION
+        # Curriculum learning settings - SLOWER PROGRESSION (v11 ORIGINAL)
         self.curriculum_stage = 0
         self.available_tools_by_stage = {
             0: ['price_comparison'],  # Stage 0: Only price comparison
@@ -165,7 +165,7 @@ class IntegratedEnhancedTrainer:
         }
         # Track when each stage started for adaptive progression
         self.stage_start_epochs = {0: 0}
-        self.min_epochs_per_stage = 20  # Minimum epochs before considering stage advancement
+        self.min_epochs_per_stage = 20  # RESTORED: v11 original value
         
         # Tool exploration settings - MUCH MORE AGGRESSIVE
         self.force_exploration_prob = 0.5  # Increased from 30% to 50%
@@ -201,10 +201,10 @@ class IntegratedEnhancedTrainer:
             'recommendation_quality': []
         }
         
-        # Early stopping - INCREASED patience
+        # Early stopping - BALANCED patience
         self.best_eval_score = 0.0
         self.patience_counter = 0
-        self.early_stopping_patience = config.get('early_stopping_patience', 40)  # Increased from 15 to 40
+        self.early_stopping_patience = config.get('early_stopping_patience', 8)  # 8 evaluations = 40 epochs (eval every 5)
         
         # Scenario storage
         self.train_scenarios = []
@@ -319,11 +319,12 @@ class IntegratedEnhancedTrainer:
             'name': 'tool_result_encoder'
         })
         
-        optimizer = optim.AdamW(param_groups, weight_decay=self.config.get('weight_decay', 0.01))
+        optimizer = optim.AdamW(param_groups, weight_decay=self.config.get('weight_decay', 0.02))  # Increased for better regularization
         
-        # Add learning rate scheduler with LESS aggressive reduction
+        # Add learning rate scheduler with AGGRESSIVE reduction when stuck
+        # Use mode='max' since we're tracking improvement (higher is better)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.7, patience=12, min_lr=1e-6, verbose=True  # Changed factor from 0.5 to 0.7, patience from 8 to 12
+            optimizer, mode='max', factor=0.5, patience=3, min_lr=1e-6, verbose=True  # Faster adaptation
         )
         
         return optimizer
@@ -355,24 +356,26 @@ class IntegratedEnhancedTrainer:
             # Sample a scenario
             scenario = np.random.choice(real_scenarios)
             
-            # STRONGER data augmentation for better generalization
-            augmented_age = scenario["profile"]["age"] + np.random.randint(-5, 6)
+            # MINIMAL data augmentation - preserve category signals
+            augmented_age = scenario["profile"]["age"] + np.random.randint(-2, 3)  # Minimal age variation
             augmented_age = max(18, min(75, augmented_age))  # Clamp to valid range
             
-            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.75, 1.25)  # Wider range
+            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.9, 1.1)  # Minimal budget variation
             augmented_budget = max(30.0, min(300.0, augmented_budget))  # Clamp to valid range
             
-            # More aggressive hobby manipulation for diversity
+            # MINIMAL hobby manipulation - preserve category signals
             hobbies = scenario["profile"]["hobbies"].copy()
-            if len(hobbies) > 2 and np.random.random() < 0.3:  # Increased probability
-                hobbies = hobbies[:max(1, len(hobbies)-1)]  # Drop at least one
-            np.random.shuffle(hobbies)
+            if len(hobbies) > 3 and np.random.random() < 0.1:  # Very low probability
+                num_to_drop = 1  # Only drop one hobby at a time
+                hobbies = hobbies[:max(2, len(hobbies) - num_to_drop)]  # Keep at least 2
+            # Don't shuffle - preserve order which may contain semantic info
             
-            # More aggressive preference manipulation
+            # MINIMAL preference manipulation
             preferences = scenario["profile"]["preferences"].copy()
-            if np.random.random() < 0.25 and len(preferences) > 2:  # Increased probability
-                preferences = preferences[:max(1, len(preferences)-1)]  # Drop at least one
-            np.random.shuffle(preferences)
+            if np.random.random() < 0.1 and len(preferences) > 3:  # Very low probability
+                num_to_drop = 1  # Only drop one preference at a time
+                preferences = preferences[:max(2, len(preferences) - num_to_drop)]  # Keep at least 2
+            # Don't shuffle - preserve order
             
             # Create user profile with augmentation
             user = UserProfile(
@@ -406,22 +409,22 @@ class IntegratedEnhancedTrainer:
             # Sample a synthetic scenario
             scenario = np.random.choice(synthetic_scenarios)
             
-            # Apply augmentation to synthetic data as well
-            augmented_age = scenario["profile"]["age"] + np.random.randint(-5, 6)
+            # MINIMAL augmentation for synthetic data too
+            augmented_age = scenario["profile"]["age"] + np.random.randint(-2, 3)
             augmented_age = max(18, min(75, augmented_age))
             
-            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.75, 1.25)
+            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.9, 1.1)
             augmented_budget = max(30.0, min(300.0, augmented_budget))
             
             hobbies = scenario["profile"]["hobbies"].copy()
-            if len(hobbies) > 2 and np.random.random() < 0.3:
-                hobbies = hobbies[:max(1, len(hobbies)-1)]
-            np.random.shuffle(hobbies)
+            if len(hobbies) > 3 and np.random.random() < 0.1:
+                hobbies = hobbies[:max(2, len(hobbies)-1)]
+            # Don't shuffle
             
             preferences = scenario["profile"]["preferences"].copy()
-            if np.random.random() < 0.25 and len(preferences) > 2:
-                preferences = preferences[:max(1, len(preferences)-1)]
-            np.random.shuffle(preferences)
+            if np.random.random() < 0.1 and len(preferences) > 3:
+                preferences = preferences[:max(2, len(preferences)-1)]
+            # Don't shuffle
             
             # Create user profile from synthetic data
             user = UserProfile(
@@ -494,13 +497,13 @@ class IntegratedEnhancedTrainer:
         total_loss = torch.tensor(0.0, device=device)
         loss_components = {}
         
-        # 1. Category matching loss with label smoothing
+        # 1. Category matching loss with label smoothing (v11 ORIGINAL)
         category_targets = []
-        label_smoothing = 0.1  # Smooth labels to prevent overconfidence
+        label_smoothing = 0.1  # RESTORED: Original v11 value
         
         for target in targets:
             expected_cats = target['expected_categories']
-            # Create target vector with label smoothing
+            # Create target vector with label smoothing (v11 original)
             target_vector = torch.full((len(self.model.gift_categories),), 
                                       label_smoothing / len(self.model.gift_categories), 
                                       device=device)
@@ -516,7 +519,7 @@ class IntegratedEnhancedTrainer:
             if category_scores.dim() == 3:
                 category_scores = category_scores.squeeze(1)
             category_loss = nn.BCELoss()(category_scores, category_target_tensor)
-            total_loss += self.config.get('category_loss_weight', 0.35) * category_loss  # INCREASED from 0.15 to 0.35 for better category learning
+            total_loss += self.config.get('category_loss_weight', 0.50) * category_loss  # INCREASED to 0.50 to prevent category matching collapse
             loss_components['category_loss'] = category_loss.item()
         
         # 2. Tool diversity loss (filtered by curriculum)
@@ -542,7 +545,7 @@ class IntegratedEnhancedTrainer:
             if tool_scores.dim() == 3:
                 tool_scores = tool_scores.squeeze(1)
             tool_loss = nn.BCELoss()(tool_scores, tool_target_tensor)
-            total_loss += self.config.get('tool_diversity_loss_weight', 0.40) * tool_loss  # INCREASED from 0.25 to 0.40 for better tool learning
+            total_loss += self.config.get('tool_diversity_loss_weight', 0.30) * tool_loss  # BALANCED at 0.30 to give more weight to category learning
             loss_components['tool_loss'] = tool_loss.item()
         
         # 3. Enhanced reward prediction loss with tool execution feedback
@@ -1190,9 +1193,9 @@ class IntegratedEnhancedTrainer:
             
             # Update weights every accumulation_steps
             if (batch_idx + 1) % accumulation_steps == 0:
-                # Gradient clipping for both model and tool encoder (INCREASED to 5.0 for faster learning)
+                # Gradient clipping for both model and tool encoder (CONSERVATIVE for stability)
                 all_params = list(self.model.parameters()) + list(self.tool_result_encoder.parameters())
-                torch.nn.utils.clip_grad_norm_(all_params, max_norm=5.0)  # Increased from 2.0 to 5.0
+                torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)  # Very conservative to prevent instability
                 
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -1239,11 +1242,11 @@ class IntegratedEnhancedTrainer:
             # ADAPTIVE curriculum stage progression based on tool usage
             old_stage = self.curriculum_stage
             
-            if epoch < 10:
+            if epoch < 20:  # Stage 0: Learn price_comparison
                 self.curriculum_stage = 0
-            elif epoch < 25:
+            elif epoch < 60:  # Stage 1: EXTENDED - Learn price + review (was 45)
                 self.curriculum_stage = 1
-            elif epoch < 45:
+            elif epoch < 100:  # Stage 2: EXTENDED - Add inventory (was 75)
                 self.curriculum_stage = 2
             else:
                 # For Stage 3+, check if tools are being used enough before advancing
@@ -1292,12 +1295,18 @@ class IntegratedEnhancedTrainer:
                       f"Avg Reward: {eval_metrics['average_reward']:.3f}, "
                       f"Quality: {eval_metrics['recommendation_quality']:.3f}")
                 
-                # Update learning rate scheduler
-                self.scheduler.step(train_metrics.get('total_loss', 0))
-                
                 # Check for improvement with SMALLER threshold
-                current_score = eval_metrics['recommendation_quality']
+                # Use a balanced score combining multiple metrics
+                current_score = (
+                    eval_metrics['recommendation_quality'] * 0.4 +  # Main quality metric
+                    eval_metrics['category_match_rate'] * 0.3 +     # Category accuracy
+                    eval_metrics['tool_match_rate'] * 0.2 +         # Tool selection accuracy
+                    eval_metrics['tool_execution_success'] * 0.1    # Tool execution success
+                )
                 improvement_threshold = self.config.get('improvement_threshold', 0.001)  # Consider 0.1% improvement as progress
+                
+                # Update learning rate scheduler with balanced score (higher is better)
+                self.scheduler.step(current_score)
                 
                 if current_score > self.best_eval_score + improvement_threshold:
                     self.best_eval_score = current_score
@@ -1309,11 +1318,13 @@ class IntegratedEnhancedTrainer:
                     print(f"⏳ No improvement for {self.patience_counter} evaluation(s)")
                 
                 # Early stopping check - MORE LENIENT
-                if self.patience_counter >= self.early_stopping_patience // eval_frequency:
+                # patience_counter counts evaluations, not epochs
+                # We want to wait for early_stopping_patience evaluations before stopping
+                if self.patience_counter >= self.early_stopping_patience:
                     # Don't stop if we're in early stages or just advanced curriculum
                     epochs_in_current_stage = epoch - self.stage_start_epochs.get(self.curriculum_stage, 0)
                     
-                    if self.curriculum_stage < 3 or epochs_in_current_stage < 15:
+                    if self.curriculum_stage < 4 or epochs_in_current_stage < 20:
                         print(f"⏰ Early stopping delayed - still in curriculum stage {self.curriculum_stage}")
                         self.patience_counter = self.patience_counter // 2  # Reset partially
                     else:
@@ -1403,10 +1414,27 @@ def main():
                        help='Use synthetic data for training')
     parser.add_argument('--synthetic_ratio', type=float, default=0.5,
                        help='Ratio of synthetic data in batches (0.0-1.0, default: 0.5)')
+    parser.add_argument('--seed', type=int, default=None,
+                       help='Random seed for reproducibility (default: None - random)')
     args = parser.parse_args()
     
-    print("🚀 INTEGRATED ENHANCED TRM TRAINING")
-    print("=" * 60)
+    # Set random seeds for reproducibility (only if seed is provided)
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        random.seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(args.seed)
+            torch.cuda.manual_seed_all(args.seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+        print("🚀 INTEGRATED ENHANCED TRM TRAINING")
+        print("=" * 60)
+        print(f"🎲 Random seed: {args.seed}")
+    else:
+        print("🚀 INTEGRATED ENHANCED TRM TRAINING")
+        print("=" * 60)
+        print("🎲 Random seed: None (random initialization)")
     
     if args.use_synthetic_data:
         print(f"🤖 Sentetik veri modu aktif - Oran: {args.synthetic_ratio:.1%}")
@@ -1414,25 +1442,25 @@ def main():
     # Create enhanced configuration
     config = create_integrated_enhanced_config()
     
-    # Add training-specific parameters (optimized v11 - BALANCED & STABLE)
+    # Add training-specific parameters (v11 EXACT RESTORE - PROVEN WORKING)
     config.update({
         'batch_size': args.batch_size,
         'num_epochs': args.epochs,
-        'eval_frequency': 5,  # More frequent evaluation
-        'early_stopping_patience': 40,  # Increased patience to allow for recovery
-        'user_profile_lr': 1.2e-4,
-        'category_matching_lr': 4.0e-4,  # Strong category learning
-        'tool_selection_lr': 3.0e-4,  # BALANCED: Reduced from 6e-4 for stability
-        'reward_prediction_lr': 2.5e-4,
-        'main_lr': 1.2e-4,
-        'weight_decay': 0.015,
-        'category_loss_weight': 0.70,  # INCREASED: Prioritize main task (was 0.50)
-        'tool_diversity_loss_weight': 0.40,  # BALANCED: Increased from 0.25 to prevent mode collapse
-        'tool_execution_loss_weight': 0.20,  # BALANCED: Moderate penalty (was 0.10)
-        'reward_loss_weight': 0.18,  # Kept same
-        'semantic_matching_loss_weight': 0.12,  # Kept same
+        'eval_frequency': 5,
+        'early_stopping_patience': 8,  # 8 evaluations = 40 epochs with eval_frequency=5
+        'user_profile_lr': 5e-5,  # ULTRA STABLE: Prevent overfitting
+        'category_matching_lr': 8e-5,  # ULTRA STABLE: Slow and steady
+        'tool_selection_lr': 5e-5,  # ULTRA STABLE: Minimal tool focus
+        'reward_prediction_lr': 5e-5,  # ULTRA STABLE: Prevent overfitting
+        'main_lr': 5e-5,  # ULTRA STABLE: Overall stability
+        'weight_decay': 0.03,  # INCREASED: Stronger regularization against overfitting
+        'category_loss_weight': 2.00,  # CRITICAL: Maximum priority on category learning
+        'tool_diversity_loss_weight': 0.15,  # MINIMAL: Reduce tool pressure further
+        'tool_execution_loss_weight': 0.10,  # MINIMAL: Reduce execution pressure
+        'reward_loss_weight': 0.10,  # MINIMAL: Balance with category
+        'semantic_matching_loss_weight': 0.15,  # INCREASED: Help category understanding
         'embedding_reg_weight': 1.5e-5,
-        'tool_encoder_lr': 3.0e-4,  # BALANCED: Reduced from 5e-4
+        'tool_encoder_lr': 3.0e-4,
         'hidden_dim': 128,
         'improvement_threshold': 0.001,
         'stage_timeout_epochs': 35
