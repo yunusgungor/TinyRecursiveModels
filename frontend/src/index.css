@@ -7,14 +7,58 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+
+  /* Light theme colors */
+  --color-background: 249 250 251; /* gray-50 */
+  --color-foreground: 17 24 39; /* gray-900 */
+  --color-card: 255 255 255; /* white */
+  --color-card-foreground: 17 24 39; /* gray-900 */
+  --color-primary: 37 99 235; /* blue-600 */
+  --color-primary-foreground: 255 255 255; /* white */
+  --color-secondary: 243 244 246; /* gray-100 */
+  --color-secondary-foreground: 17 24 39; /* gray-900 */
+  --color-muted: 243 244 246; /* gray-100 */
+  --color-muted-foreground: 107 114 128; /* gray-500 */
+  --color-accent: 243 244 246; /* gray-100 */
+  --color-accent-foreground: 17 24 39; /* gray-900 */
+  --color-border: 229 231 235; /* gray-200 */
+  --color-input: 229 231 235; /* gray-200 */
+  --color-ring: 37 99 235; /* blue-600 */
+}
+
+.dark {
+  /* Dark theme colors */
+  --color-background: 17 24 39; /* gray-900 */
+  --color-foreground: 243 244 246; /* gray-100 */
+  --color-card: 31 41 55; /* gray-800 */
+  --color-card-foreground: 243 244 246; /* gray-100 */
+  --color-primary: 59 130 246; /* blue-500 */
+  --color-primary-foreground: 255 255 255; /* white */
+  --color-secondary: 55 65 81; /* gray-700 */
+  --color-secondary-foreground: 243 244 246; /* gray-100 */
+  --color-muted: 55 65 81; /* gray-700 */
+  --color-muted-foreground: 156 163 175; /* gray-400 */
+  --color-accent: 55 65 81; /* gray-700 */
+  --color-accent-foreground: 243 244 246; /* gray-100 */
+  --color-border: 55 65 81; /* gray-700 */
+  --color-input: 55 65 81; /* gray-700 */
+  --color-ring: 59 130 246; /* blue-500 */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  /* Prevent font size adjustments on orientation change */
+  -webkit-text-size-adjust: 100%;
+  /* Enable smooth scrolling */
+  scroll-behavior: smooth;
 }
 
 body {
@@ -22,8 +66,57 @@ body {
   display: flex;
   min-width: 320px;
   min-height: 100vh;
+  background-color: rgb(var(--color-background));
+  color: rgb(var(--color-foreground));
+  /* Prevent overscroll bounce on iOS */
+  overscroll-behavior-y: none;
 }
 
 #root {
   width: 100%;
+}
+
+/* Touch-friendly button styles */
+@layer utilities {
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  .touch-manipulation {
+    touch-action: manipulation;
+  }
+}
+
+/* Smooth transitions for theme changes */
+* {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Disable transitions on page load */
+.preload * {
+  transition: none !important;
+}
+
+/* Custom scrollbar for webkit browsers */
+@media (min-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: rgb(var(--color-background));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--color-muted-foreground));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--color-foreground) / 0.5);
+  }
 }
