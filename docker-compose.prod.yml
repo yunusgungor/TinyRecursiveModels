@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: trendyol-gift-postgres-prod
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - trendyol-network-prod
+
+  redis:
+    image: redis:7-alpine
+    container_name: trendyol-gift-redis-prod
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data_prod:/data
+    restart: unless-stopped
+    networks:
+      - trendyol-network-prod
+
+  backend:
+    build:
+      context: ./backend
+      target: production
+    container_name: trendyol-gift-backend-prod
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - TRENDYOL_API_KEY=${TRENDYOL_API_KEY}
+      - TRENDYOL_API_SECRET=${TRENDYOL_API_SECRET}
+      - MODEL_CHECKPOINT_PATH=/app/checkpoints/integrated_enhanced/integrated_enhanced_best.pt
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./checkpoints:/app/checkpoints:ro
+      - ./models:/app/models:ro
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - trendyol-network-prod
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+    container_name: trendyol-gift-frontend-prod
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - trendyol-network-prod
+
+  nginx:
+    image: nginx:alpine
+    container_name: trendyol-gift-nginx-prod
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - trendyol-network-prod
+
+volumes:
+  postgres_data_prod:
+  redis_data_prod:
+
+networks:
+  trendyol-network-prod:
+    driver: bridge

@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: trendyol-gift-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-trendyol_gift}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trendyol-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: trendyol-gift-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trendyol-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      target: development
+    container_name: trendyol-gift-backend
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-trendyol_gift}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis}@redis:6379/0
+      - TRENDYOL_API_KEY=${TRENDYOL_API_KEY}
+      - TRENDYOL_API_SECRET=${TRENDYOL_API_SECRET}
+      - MODEL_CHECKPOINT_PATH=/app/checkpoints/integrated_enhanced/integrated_enhanced_best.pt
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./backend:/app
+      - ./checkpoints:/app/checkpoints:ro
+      - ./models:/app/models:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trendyol-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    container_name: trendyol-gift-frontend
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - trendyol-network
+    stdin_open: true
+    tty: true
+
+  # Nginx Reverse Proxy (Production-like)
+  nginx:
+    image: nginx:alpine
+    container_name: trendyol-gift-nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - trendyol-network
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  trendyol-network:
+    driver: bridge
