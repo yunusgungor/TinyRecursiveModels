@@ -57,9 +57,21 @@ async def run_pipeline(config_path: str = "scraping/config/scraping_config.yaml"
         orchestrator = ScrapingOrchestrator(config_manager)
         orchestrator.initialize_scrapers()
         
-        # Gemini service
+        # AI Enhancement Service (Gemini or Ollama)
         gemini_config = config_manager.get_gemini_config()
-        gemini_service = GeminiEnhancementService(gemini_config)
+        ollama_config = config_manager.get_all_config().get('ollama', {})
+        
+        if ollama_config.get('enabled', False):
+            from scraping.services.ollama_service import OllamaEnhancementService
+            logger.info(f"Using Ollama for enhancement (Model: {ollama_config.get('model', 'default')})")
+            enhancement_service = OllamaEnhancementService(ollama_config)
+        else:
+            from scraping.services.gemini_service import GeminiEnhancementService
+            logger.info("Using Gemini for enhancement")
+            enhancement_service = GeminiEnhancementService(gemini_config)
+            
+        # Compatibility alias
+        gemini_service = enhancement_service
         
         # Dataset generator
         output_config = config_manager.get_output_config()
@@ -109,7 +121,8 @@ async def run_pipeline(config_path: str = "scraping/config/scraping_config.yaml"
         # Initialize user scenario generator
         user_scenario_generator = UserScenarioGenerator(
             config=gemini_config,
-            gift_catalog_path=final_dataset_path
+            gift_catalog_path=final_dataset_path,
+            ollama_config=ollama_config
         )
         
         # Generate scenarios

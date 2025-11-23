@@ -54,6 +54,23 @@ gemini:
     - emotional_tags: emotional attributes (relaxing, exciting, practical, luxury, wireless, portable, professional, smart, eco-friendly, digital, rechargeable, etc.)
     - age_range: [min_age, max_age]
 
+ollama:
+  enabled: true
+  base_url: "http://127.0.0.1:11434"
+  model: "gemma3:270m"
+  model_name: "gemma3:270m"
+  timeout: 60
+  
+  # Smart Optimization Features
+  use_cache: true
+  smart_batching: true
+  similarity_threshold: 0.6
+  
+  # Batch Processing
+  enable_true_batch: true
+  products_per_batch: 5
+  batch_delay: 1
+
 output:
   final_dataset_path: "data/gift_catalog.json"
   user_scenarios_path: "data/user_scenarios.json"

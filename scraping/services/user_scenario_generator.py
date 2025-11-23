@@ -16,21 +16,27 @@ try:
 except ImportError:
     genai = None
 
+import aiohttp
+
 from ..utils.cache_manager import CacheManager
 
 
 class UserScenarioGenerator:
     """Generates realistic user scenarios for gift recommendation testing"""
     
-    def __init__(self, config: Dict[str, Any], gift_catalog_path: str):
+    def __init__(self, config: Dict[str, Any], gift_catalog_path: str, ollama_config: Dict[str, Any] = None):
         """
         Initialize user scenario generator
         
         Args:
             config: Gemini API configuration
             gift_catalog_path: Path to gift catalog JSON file
+            ollama_config: Optional Ollama configuration
         """
         self.config = config
+        self.ollama_config = ollama_config or {}
+        self.use_ollama = self.ollama_config.get('enabled', False)
+        
         self.gift_catalog_path = gift_catalog_path
         self.logger = logging.getLogger(__name__)
         self.enabled = True
@@ -61,30 +67,35 @@ class UserScenarioGenerator:
         # Request tracking
         self.request_count = 0
 
-        # Check if google-generativeai is installed
-        if genai is None:
-            self.logger.warning("google-generativeai not installed. Using fallback generation.")
-            self.enabled = False
-            return
-        
-        # Get API key
-        api_key_env = config.get('api_key_env', 'GEMINI_API_KEY')
-        api_key = os.getenv(api_key_env)
-        
-        if not api_key:
-            self.logger.warning(f"Gemini API key not found. Using fallback generation.")
-            self.enabled = False
-            return
-        
-        # Configure Gemini
-        try:
-            genai.configure(api_key=api_key)
-            model_name = config.get('model', 'gemini-2.0-flash')
-            self.model = genai.GenerativeModel(model_name)
-            self.logger.info(f"UserScenarioGenerator initialized with model: {model_name}")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize Gemini: {e}")
-            self.enabled = False
+        if self.use_ollama:
+            self.model_name = self.ollama_config.get('model', 'gemma3:270m')
+            self.base_url = self.ollama_config.get('base_url', 'http://localhost:11434')
+            self.logger.info(f"UserScenarioGenerator initialized with Ollama model: {self.model_name}")
+        else:
+            # Check if google-generativeai is installed
+            if genai is None:
+                self.logger.warning("google-generativeai not installed. Using fallback generation.")
+                self.enabled = False
+                return
+            
+            # Get API key
+            api_key_env = config.get('api_key_env', 'GEMINI_API_KEY')
+            api_key = os.getenv(api_key_env)
+            
+            if not api_key:
+                self.logger.warning(f"Gemini API key not found. Using fallback generation.")
+                self.enabled = False
+                return
+            
+            # Configure Gemini
+            try:
+                genai.configure(api_key=api_key)
+                model_name = config.get('model', 'gemini-2.0-flash')
+                self.model = genai.GenerativeModel(model_name)
+                self.logger.info(f"UserScenarioGenerator initialized with model: {model_name}")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize Gemini: {e}")
+                self.enabled = False
 
     def _load_gift_catalog(self) -> Dict[str, Any]:
         """Load gift catalog from JSON file"""
@@ -285,35 +296,50 @@ class UserScenarioGenerator:
             'premium': (min_price + 3 * range_size, max_price)
         }
 
+    async def _call_ollama(self, prompt: str) -> str:
+        """Call Ollama API"""
+        url = f"{self.base_url}/api/generate"
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.7}
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=60) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return result.get('response', '')
+                    else:
+                        self.logger.error(f"Ollama API error: {response.status}")
+                        return ""
+        except Exception as e:
+            self.logger.error(f"Ollama connection error: {e}")
+            return ""
+
     async def _generate_ai_scenario_batch(self, start_index: int, batch_count: int,
                                           categories: List[str], tags: List[str], 
                                           occasions: List[str], price_ranges: Dict[str, tuple]) -> List[Dict[str, Any]]:
-        """
-        Generate multiple scenarios in a single API call
+        """Generate multiple scenarios in a single API call (Gemini or Ollama)"""
         
-        This is the KEY optimization - instead of 1 API call per scenario,
-        we generate N scenarios per API call, reducing API usage by N times.
-        
-        Args:
-            start_index: Starting index for scenario IDs
-            batch_count: Number of scenarios to generate in this batch
-            categories, tags, occasions, price_ranges: Catalog data
-            
-        Returns:
-            List of generated scenarios
-        """
         # Build batch prompt
         prompt = self._build_batch_scenario_prompt(batch_count, categories, tags, occasions, price_ranges)
         
         # Try with retries
         for attempt in range(self.retry_attempts):
             try:
-                response = await asyncio.to_thread(
-                    self.model.generate_content,
-                    prompt
-                )
+                if self.use_ollama:
+                    response_text = await self._call_ollama(prompt)
+                else:
+                    response = await asyncio.to_thread(
+                        self.model.generate_content,
+                        prompt
+                    )
+                    response_text = response.text
                 
-                scenarios = self._parse_batch_scenario_response(response.text, start_index, batch_count)
+                scenarios = self._parse_batch_scenario_response(response_text, start_index, batch_count)
                 self.request_count += 1
                 
                 if scenarios:
@@ -321,11 +347,11 @@ class UserScenarioGenerator:
                     return scenarios
                 
             except Exception as e:
-                self.logger.error(f"Gemini API error (attempt {attempt + 1}): {e}")
+                self.logger.error(f"AI Generation error (attempt {attempt + 1}): {e}")
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay * (attempt + 1))
         
-        # Fallback: generate scenarios individually using fallback method
+        # Fallback
         self.logger.warning(f"Batch generation failed, using fallback for {batch_count} scenarios")
         fallback_scenarios = []
         for i in range(batch_count):
@@ -337,88 +363,10 @@ class UserScenarioGenerator:
         
         return fallback_scenarios
 
-    def _build_batch_scenario_prompt(self, batch_count: int, categories: List[str], 
-                                     tags: List[str], occasions: List[str], 
-                                     price_ranges: Dict[str, tuple]) -> str:
-        """Build prompt for batch scenario generation"""
-        
-        # Sample from available data
-        sample_categories = random.sample(categories, min(10, len(categories)))
-        sample_tags = random.sample(tags, min(15, len(tags)))
-        sample_occasions = occasions if len(occasions) <= 10 else random.sample(occasions, 10)
-        
-        # Get price range info
-        price_info = f"{price_ranges['low'][0]:.0f}-{price_ranges['premium'][1]:.0f}"
-        
-        return f"""Generate {batch_count} DIVERSE, realistic user profiles for gift recommendation testing based on REAL scraped data.
-
-REAL Available Categories: {', '.join(sample_categories)}
-REAL Available Tags/Interests: {', '.join(sample_tags)}
-REAL Available Occasions: {', '.join(sample_occasions)}
-REAL Price Range: {price_info} TL
-
-Create {batch_count} DIFFERENT people with VARIED characteristics:
-- Age (16-70) - VARY the ages across the batch
-- 2-4 hobbies/interests ONLY from the available tags above - VARY the combinations
-- Relationship to gift recipient (friend, mother, father, sister, brother, colleague, spouse, uncle, aunt, cousin, grandparent)
-- Budget in TL (within the real price range above) - VARY budget levels
-- Occasion ONLY from the available occasions above - VARY occasions
-- 2-4 preferences that match the available tags
-
-IMPORTANT: Make each profile UNIQUE and DIVERSE. Vary age groups, budget levels, interests, and occasions.
-
-Return ONLY valid JSON array:
-[
-  {{
-    "age": <number>,
-    "hobbies": [<list of 2-4 hobbies from available tags>],
-    "relationship": "<relationship>",
-    "budget": <number within real price range>,
-    "occasion": "<occasion from available occasions>",
-    "preferences": [<list of 2-4 preferences from available tags>]
-  }},
-  ... ({batch_count} profiles total)
-]"""
-
-    def _parse_batch_scenario_response(self, response: str, start_index: int, 
-                                       expected_count: int) -> List[Dict[str, Any]]:
-        """Parse batch Gemini response into multiple scenarios"""
-        try:
-            # Extract JSON array from response
-            start = response.find('[')
-            end = response.rfind(']') + 1
-            
-            if start != -1 and end != 0:
-                json_str = response[start:end]
-                profiles = json.loads(json_str)
-                
-                if not isinstance(profiles, list):
-                    self.logger.warning("Response is not a list")
-                    return []
-                
-                # Build scenarios from profiles
-                scenarios = []
-                for idx, profile in enumerate(profiles):
-                    scenario = {
-                        "id": f"scenario_{start_index + idx:04d}",
-                        "profile": profile,
-                        "expected_categories": self._infer_categories(profile),
-                        "expected_tools": self._infer_tools(profile)
-                    }
-                    scenarios.append(scenario)
-                
-                self.logger.info(f"Parsed {len(scenarios)}/{expected_count} scenarios from batch response")
-                return scenarios
-                
-        except Exception as e:
-            self.logger.warning(f"Failed to parse batch scenario response: {e}")
-        
-        return []
-
     async def _generate_ai_scenario(self, index: int, categories: List[str], 
                                    tags: List[str], occasions: List[str], 
                                    price_ranges: Dict[str, tuple]) -> Optional[Dict[str, Any]]:
-        """Generate scenario using Gemini API"""
+        """Generate scenario using AI (Gemini or Ollama)"""
         
         # Build prompt
         prompt = self._build_scenario_prompt(categories, tags, occasions, price_ranges)
@@ -426,21 +374,25 @@ Return ONLY valid JSON array:
         # Try with retries
         for attempt in range(self.retry_attempts):
             try:
-                response = await asyncio.to_thread(
-                    self.model.generate_content,
-                    prompt
-                )
+                if self.use_ollama:
+                    response_text = await self._call_ollama(prompt)
+                else:
+                    response = await asyncio.to_thread(
+                        self.model.generate_content,
+                        prompt
+                    )
+                    response_text = response.text
                 
-                scenario = self._parse_scenario_response(response.text, index)
+                scenario = self._parse_scenario_response(response_text, index)
                 self.request_count += 1
                 return scenario
                 
             except Exception as e:
-                self.logger.error(f"Gemini API error (attempt {attempt + 1}): {e}")
+                self.logger.error(f"AI Generation error (attempt {attempt + 1}): {e}")
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay * (attempt + 1))
         
-        # Fallback if all retries failed
+        # Fallback
         return self._generate_fallback_scenario(index, categories, tags, occasions, price_ranges)
 
     def _build_scenario_prompt(self, categories: List[str], tags: List[str], 
@@ -479,6 +431,80 @@ Return ONLY valid JSON:
   "occasion": "<occasion from available occasions>",
   "preferences": [<list of 2-4 preferences from available tags>]
 }}"""
+
+    def _build_batch_scenario_prompt(self, batch_count: int, categories: List[str], tags: List[str], 
+                              occasions: List[str], price_ranges: Dict[str, tuple]) -> str:
+        """Build prompt for batch scenario generation"""
+        
+        # Sample from available data (larger sample for batch)
+        sample_categories = random.sample(categories, min(20, len(categories)))
+        sample_tags = random.sample(tags, min(30, len(tags)))
+        sample_occasions = occasions if len(occasions) <= 15 else random.sample(occasions, 15)
+        
+        # Get price range info
+        price_info = f"{price_ranges['low'][0]:.0f}-{price_ranges['premium'][1]:.0f}"
+        
+        return f"""Generate {batch_count} REALISTIC and DIVERSE user profiles for gift recommendation testing based on REAL scraped data.
+
+REAL Available Categories: {', '.join(sample_categories)}
+REAL Available Tags/Interests: {', '.join(sample_tags)}
+REAL Available Occasions: {', '.join(sample_occasions)}
+REAL Price Range: {price_info} TL
+
+Create {batch_count} different people with diverse ages, budgets, and needs.
+For each person:
+- Age (16-70)
+- 2-4 hobbies/interests ONLY from the available tags above
+- Relationship to gift recipient
+- Budget in TL (within the real price range above)
+- Occasion ONLY from the available occasions above
+- 2-4 preferences that match the available tags
+
+Return ONLY a valid JSON ARRAY of objects:
+[
+  {{
+    "age": <number>,
+    "hobbies": [<list of 2-4 hobbies>],
+    "relationship": "<relationship>",
+    "budget": <number>,
+    "occasion": "<occasion>",
+    "preferences": [<list of 2-4 preferences>]
+  }},
+  ...
+]"""
+
+    def _parse_batch_scenario_response(self, response: str, start_index: int, expected_count: int) -> List[Dict[str, Any]]:
+        """Parse batch response into scenario list"""
+        try:
+            # Extract JSON from response
+            start = response.find('[')
+            end = response.rfind(']') + 1
+            
+            if start != -1 and end != 0:
+                json_str = response[start:end]
+                profiles = json.loads(json_str)
+                
+                if not isinstance(profiles, list):
+                    self.logger.warning("Batch response is not a list")
+                    return []
+                
+                scenarios = []
+                for i, profile in enumerate(profiles):
+                    # Build scenario
+                    scenario = {
+                        "id": f"scenario_{start_index + i:04d}",
+                        "profile": profile,
+                        "expected_categories": self._infer_categories(profile),
+                        "expected_tools": self._infer_tools(profile)
+                    }
+                    scenarios.append(scenario)
+                
+                return scenarios
+        except Exception as e:
+            self.logger.warning(f"Failed to parse batch scenario response: {e}")
+        
+        return []
+
 
     def _parse_scenario_response(self, response: str, index: int) -> Optional[Dict[str, Any]]:
         """Parse Gemini response into scenario format"""
