@@ -135,3 +135,6 @@ test_data/
 checkpoints/
 wandb/
 test_results/
+
+# Scraping cache files
+scraping/cache/*.json

@@ -28,8 +28,18 @@ gemini:
   retry_attempts: 3
   retry_delay: 5
   timeout: 30
-  batch_size: 1  # Process 1 at a time to avoid rate limits
-  batch_delay: 5  # Wait 5 seconds between requests
+  
+  # Smart Optimization Features 🚀
+  use_cache: true  # Cache previous API responses
+  smart_batching: true  # Group similar products to reduce API calls
+  similarity_threshold: 0.6  # Similarity threshold for grouping (0-1)
+  
+  # TRUE Batch Processing (Multiple products per API call)
+  enable_true_batch: true  # Send multiple products in ONE API call
+  products_per_batch: 5  # Process 5 products per API call (reduces calls by 5x)
+  
+  batch_size: 1  # Process 1 batch at a time to avoid rate limits
+  batch_delay: 10  # Wait 10 seconds between requests (increased from 5)
   
   enhancement_prompt: |
     Analyze this product and provide structured information:
@@ -47,4 +57,9 @@ gemini:
 output:
   final_dataset_path: "data/gift_catalog.json"
   user_scenarios_path: "data/user_scenarios.json"
-  num_user_scenarios: 10  # Reduced to avoid rate limits
+  num_user_scenarios: 100  # Total scenarios to generate
+  
+  # Scenario Generation Optimization 🚀
+  scenario_batch_size: 10  # Generate N scenarios per API call (reduces API usage 10x)
+  scenario_ai_ratio: 0.2  # Use AI for 20% of scenarios, fallback for 80% (reduces API usage 5x)
+  scenario_use_cache: true  # Cache similar scenario profiles

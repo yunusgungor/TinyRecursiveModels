@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.optim as optim
 import wandb
 import numpy as np
+import random
 from datetime import datetime
 from typing import Dict, List, Any, Tuple
 import json
@@ -57,9 +58,15 @@ class ToolResultEncoder(nn.Module):
             nn.Linear(hidden_dim, hidden_dim)
         )
         
+        self.budget_encoder = nn.Sequential(
+            nn.Linear(2, hidden_dim),  # [num_optimized, total_value]
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
         # Fusion layer to combine multiple tool results
         self.fusion = nn.Sequential(
-            nn.Linear(hidden_dim * 4, hidden_dim),
+            nn.Linear(hidden_dim * 5, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim)
         )
@@ -85,11 +92,17 @@ class ToolResultEncoder(nn.Module):
             features = torch.tensor([num_available, num_unavailable], dtype=torch.float32, device=device)
             return self.inventory_encoder(features)
         
-        elif tool_name == 'trend_analyzer':
+        elif tool_name == 'trend_analysis':
             num_trending = len(result.get('trending', []))
             avg_popularity = result.get('average_popularity', 0.0)
             features = torch.tensor([num_trending, avg_popularity], dtype=torch.float32, device=device)
             return self.trend_encoder(features)
+        
+        elif tool_name == 'budget_optimizer':
+            num_optimized = len(result.get('optimized_gifts', []))
+            total_value = result.get('total_value', 0.0)
+            features = torch.tensor([num_optimized, total_value], dtype=torch.float32, device=device)
+            return self.budget_encoder(features)
         
         else:
             return torch.zeros(self.hidden_dim, device=device)
@@ -101,7 +114,8 @@ class ToolResultEncoder(nn.Module):
             'price_comparison': torch.zeros(self.hidden_dim, device=device),
             'review_analysis': torch.zeros(self.hidden_dim, device=device),
             'inventory_check': torch.zeros(self.hidden_dim, device=device),
-            'trend_analyzer': torch.zeros(self.hidden_dim, device=device)
+            'trend_analysis': torch.zeros(self.hidden_dim, device=device),
+            'budget_optimizer': torch.zeros(self.hidden_dim, device=device)
         }
         
         # Encode available results
@@ -114,7 +128,8 @@ class ToolResultEncoder(nn.Module):
             encoded_results['price_comparison'],
             encoded_results['review_analysis'],
             encoded_results['inventory_check'],
-            encoded_results['trend_analyzer']
+            encoded_results['trend_analysis'],
+            encoded_results['budget_optimizer']
         ])
         
         return self.fusion(concatenated)
@@ -123,9 +138,11 @@ class ToolResultEncoder(nn.Module):
 class IntegratedEnhancedTrainer:
     """Trainer for the integrated enhanced model with all improvements"""
     
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, use_synthetic_data: bool = False, synthetic_ratio: float = 0.5):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.use_synthetic_data = use_synthetic_data
+        self.synthetic_ratio = synthetic_ratio  # Ratio of synthetic data in batches (0.0-1.0)
         
         # Initialize model
         self.model = IntegratedEnhancedTRM(config).to(self.device)
@@ -133,17 +150,34 @@ class IntegratedEnhancedTrainer:
         # Initialize tool result encoder
         self.tool_result_encoder = ToolResultEncoder(hidden_dim=config.get('hidden_dim', 128)).to(self.device)
         
-        # Initialize environment
-        self.env = GiftRecommendationEnvironment("data/gift_catalog.json")
+        # Initialize environment with appropriate gift catalog
+        gift_catalog_path = "data/fully_learned_synthetic_gifts.json" if use_synthetic_data else "data/gift_catalog.json"
+        self.env = GiftRecommendationEnvironment(gift_catalog_path)
         
-        # Curriculum learning settings
+        # Curriculum learning settings - SLOWER PROGRESSION
         self.curriculum_stage = 0
         self.available_tools_by_stage = {
             0: ['price_comparison'],  # Stage 0: Only price comparison
             1: ['price_comparison', 'review_analysis'],  # Stage 1: Add reviews
             2: ['price_comparison', 'review_analysis', 'inventory_check'],  # Stage 2: Add inventory
-            3: ['price_comparison', 'review_analysis', 'inventory_check', 'trend_analyzer']  # Stage 3: All tools
+            3: ['price_comparison', 'review_analysis', 'inventory_check', 'trend_analysis'],  # Stage 3: Add trend
+            4: ['price_comparison', 'review_analysis', 'inventory_check', 'trend_analysis', 'budget_optimizer']  # Stage 4: All tools
         }
+        # Track when each stage started for adaptive progression
+        self.stage_start_epochs = {0: 0}
+        self.min_epochs_per_stage = 20  # Minimum epochs before considering stage advancement
+        
+        # Tool exploration settings - MUCH MORE AGGRESSIVE
+        self.force_exploration_prob = 0.5  # Increased from 30% to 50%
+        self.exploration_bonus_threshold = 5000  # Force exploration if tool count < this
+        self.tool_selection_counts = {
+            'price_comparison': 0,
+            'review_analysis': 0,
+            'inventory_check': 0,
+            'trend_analysis': 0,
+            'budget_optimizer': 0
+        }
+        self.min_tool_usage_per_stage = 10000  # Minimum usage before advancing stage
         
         # Load and split scenarios for train/val
         self._load_and_split_scenarios()
@@ -167,23 +201,33 @@ class IntegratedEnhancedTrainer:
             'recommendation_quality': []
         }
         
-        # Early stopping
+        # Early stopping - INCREASED patience
         self.best_eval_score = 0.0
         self.patience_counter = 0
-        self.early_stopping_patience = config.get('early_stopping_patience', 15)
+        self.early_stopping_patience = config.get('early_stopping_patience', 40)  # Increased from 15 to 40
         
         # Scenario storage
         self.train_scenarios = []
         self.val_scenarios = []
+        self.synthetic_train_scenarios = []
+        self.synthetic_val_scenarios = []
         
         # Load scenarios BEFORE printing
         self._load_and_split_scenarios()
+        
+        # Load synthetic data if enabled
+        if use_synthetic_data:
+            self._load_synthetic_data()
         
         print(f"🚀 Integrated Enhanced Trainer initialized")
         print(f"📱 Device: {self.device}")
         print(f"🧠 Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
         print(f"📊 Training scenarios: {len(self.train_scenarios)}")
         print(f"📊 Validation scenarios: {len(self.val_scenarios)}")
+        if use_synthetic_data:
+            print(f"🤖 Synthetic training scenarios: {len(self.synthetic_train_scenarios)}")
+            print(f"🤖 Synthetic validation scenarios: {len(self.synthetic_val_scenarios)}")
+            print(f"📈 Synthetic data ratio: {synthetic_ratio:.1%}")
         
     def _load_and_split_scenarios(self):
         """Load scenarios and split into train/validation sets"""
@@ -207,6 +251,26 @@ class IntegratedEnhancedTrainer:
         
         print(f"📊 Loaded {len(all_scenarios)} scenarios: {len(self.train_scenarios)} train, {len(self.val_scenarios)} val")
     
+    def _load_synthetic_data(self):
+        """Load synthetic scenarios and split into train/validation sets"""
+        try:
+            with open("data/fully_learned_synthetic_users.json", "r") as f:
+                synthetic_data = json.load(f)
+            all_synthetic_scenarios = synthetic_data["scenarios"]
+            
+            # Shuffle and split 80/20
+            np.random.shuffle(all_synthetic_scenarios)
+            split_idx = int(len(all_synthetic_scenarios) * 0.8)
+            self.synthetic_train_scenarios = all_synthetic_scenarios[:split_idx]
+            self.synthetic_val_scenarios = all_synthetic_scenarios[split_idx:]
+            
+            print(f"🤖 Sentetik veri yüklendi: {len(all_synthetic_scenarios)} senaryo")
+            print(f"   Eğitim: {len(self.synthetic_train_scenarios)}, Doğrulama: {len(self.synthetic_val_scenarios)}")
+        except Exception as e:
+            print(f"⚠️ Sentetik veri yüklenemedi: {e}")
+            self.synthetic_train_scenarios = []
+            self.synthetic_val_scenarios = []
+    
     def _create_optimizer(self):
         """Create optimizer with different learning rates for different components"""
         # Group parameters by component
@@ -224,7 +288,7 @@ class IntegratedEnhancedTrainer:
                          [p for layer in self.model.semantic_matcher for p in layer.parameters()] +
                          list(self.model.category_attention.parameters()) +
                          list(self.model.category_scorer.parameters()),
-                'lr': self.config.get('category_matching_lr', 4e-5),  # Much more reduced
+                'lr': self.config.get('category_matching_lr', 2e-4),  # INCREASED from 4e-5 to 2e-4 for better category learning
                 'name': 'category_matching'
             },
             {
@@ -257,9 +321,9 @@ class IntegratedEnhancedTrainer:
         
         optimizer = optim.AdamW(param_groups, weight_decay=self.config.get('weight_decay', 0.01))
         
-        # Add learning rate scheduler with moderate reduction
+        # Add learning rate scheduler with LESS aggressive reduction
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=8, min_lr=1e-6, verbose=True
+            optimizer, mode='min', factor=0.7, patience=12, min_lr=1e-6, verbose=True  # Changed factor from 0.5 to 0.7, patience from 8 to 12
         )
         
         return optimizer
@@ -267,36 +331,46 @@ class IntegratedEnhancedTrainer:
     def generate_training_batch(self, batch_size: int = 16, use_validation: bool = False) -> Tuple[List[UserProfile], List[List[GiftItem]], List[Dict]]:
         """Generate a training batch with diverse user profiles and scenarios with augmentation"""
         
-        # Use appropriate scenario set
-        scenarios = self.val_scenarios if use_validation else self.train_scenarios
+        # Determine how many samples from synthetic vs real data
+        if self.use_synthetic_data and (self.synthetic_train_scenarios or self.synthetic_val_scenarios):
+            num_synthetic = int(batch_size * self.synthetic_ratio)
+            num_real = batch_size - num_synthetic
+        else:
+            num_synthetic = 0
+            num_real = batch_size
         
-        if not scenarios:
-            scenarios = self._generate_fallback_scenarios()
+        # Use appropriate scenario sets
+        real_scenarios = self.val_scenarios if use_validation else self.train_scenarios
+        synthetic_scenarios = self.synthetic_val_scenarios if use_validation else self.synthetic_train_scenarios
+        
+        if not real_scenarios:
+            real_scenarios = self._generate_fallback_scenarios()
         
         batch_users = []
         batch_gifts = []
         batch_targets = []
         
-        for _ in range(batch_size):
+        # Generate real data samples
+        for _ in range(num_real):
             # Sample a scenario
-            scenario = np.random.choice(scenarios)
+            scenario = np.random.choice(real_scenarios)
             
-            # Moderate data augmentation (reduced from aggressive)
-            augmented_age = scenario["profile"]["age"] + np.random.randint(-3, 4)
+            # STRONGER data augmentation for better generalization
+            augmented_age = scenario["profile"]["age"] + np.random.randint(-5, 6)
             augmented_age = max(18, min(75, augmented_age))  # Clamp to valid range
             
-            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.85, 1.15)
+            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.75, 1.25)  # Wider range
             augmented_budget = max(30.0, min(300.0, augmented_budget))  # Clamp to valid range
             
-            # Moderate hobby manipulation
+            # More aggressive hobby manipulation for diversity
             hobbies = scenario["profile"]["hobbies"].copy()
-            if len(hobbies) > 2 and np.random.random() < 0.2:  # Reduced probability
+            if len(hobbies) > 2 and np.random.random() < 0.3:  # Increased probability
                 hobbies = hobbies[:max(1, len(hobbies)-1)]  # Drop at least one
             np.random.shuffle(hobbies)
             
-            # Moderate preference manipulation
+            # More aggressive preference manipulation
             preferences = scenario["profile"]["preferences"].copy()
-            if np.random.random() < 0.15 and len(preferences) > 2:  # Reduced probability
+            if np.random.random() < 0.25 and len(preferences) > 2:  # Increased probability
                 preferences = preferences[:max(1, len(preferences)-1)]  # Drop at least one
             np.random.shuffle(preferences)
             
@@ -314,6 +388,55 @@ class IntegratedEnhancedTrainer:
             available_gifts = self.env.gift_catalog
             
             # Create target based on expected categories and tools
+            target = {
+                'expected_categories': scenario["expected_categories"],
+                'expected_tools': scenario["expected_tools"],
+                'user_profile': user
+            }
+            
+            batch_users.append(user)
+            batch_gifts.append(available_gifts)
+            batch_targets.append(target)
+        
+        # Generate synthetic data samples
+        for _ in range(num_synthetic):
+            if not synthetic_scenarios:
+                continue
+                
+            # Sample a synthetic scenario
+            scenario = np.random.choice(synthetic_scenarios)
+            
+            # Apply augmentation to synthetic data as well
+            augmented_age = scenario["profile"]["age"] + np.random.randint(-5, 6)
+            augmented_age = max(18, min(75, augmented_age))
+            
+            augmented_budget = scenario["profile"]["budget"] * np.random.uniform(0.75, 1.25)
+            augmented_budget = max(30.0, min(300.0, augmented_budget))
+            
+            hobbies = scenario["profile"]["hobbies"].copy()
+            if len(hobbies) > 2 and np.random.random() < 0.3:
+                hobbies = hobbies[:max(1, len(hobbies)-1)]
+            np.random.shuffle(hobbies)
+            
+            preferences = scenario["profile"]["preferences"].copy()
+            if np.random.random() < 0.25 and len(preferences) > 2:
+                preferences = preferences[:max(1, len(preferences)-1)]
+            np.random.shuffle(preferences)
+            
+            # Create user profile from synthetic data
+            user = UserProfile(
+                age=int(augmented_age),
+                hobbies=hobbies,
+                relationship=scenario["profile"]["relationship"],
+                budget=float(augmented_budget),
+                occasion=scenario["profile"]["occasion"],
+                personality_traits=preferences
+            )
+            
+            # Get available gifts
+            available_gifts = self.env.gift_catalog
+            
+            # Create target
             target = {
                 'expected_categories': scenario["expected_categories"],
                 'expected_tools': scenario["expected_tools"],
@@ -393,7 +516,7 @@ class IntegratedEnhancedTrainer:
             if category_scores.dim() == 3:
                 category_scores = category_scores.squeeze(1)
             category_loss = nn.BCELoss()(category_scores, category_target_tensor)
-            total_loss += self.config.get('category_loss_weight', 0.15) * category_loss  # Much more reduced
+            total_loss += self.config.get('category_loss_weight', 0.35) * category_loss  # INCREASED from 0.15 to 0.35 for better category learning
             loss_components['category_loss'] = category_loss.item()
         
         # 2. Tool diversity loss (filtered by curriculum)
@@ -419,7 +542,7 @@ class IntegratedEnhancedTrainer:
             if tool_scores.dim() == 3:
                 tool_scores = tool_scores.squeeze(1)
             tool_loss = nn.BCELoss()(tool_scores, tool_target_tensor)
-            total_loss += self.config.get('tool_diversity_loss_weight', 0.25) * tool_loss  # Increased from 0.15
+            total_loss += self.config.get('tool_diversity_loss_weight', 0.40) * tool_loss  # INCREASED from 0.25 to 0.40 for better tool learning
             loss_components['tool_loss'] = tool_loss.item()
         
         # 3. Enhanced reward prediction loss with tool execution feedback
@@ -498,6 +621,33 @@ class IntegratedEnhancedTrainer:
         
         # 4. Tool execution success loss (binary classification)
         tool_execution_loss = torch.tensor(0.0, device=device)
+        tool_usage_penalty = torch.tensor(0.0, device=device)  # NEW: Penalty for not using tools
+        tool_selection_penalty = torch.tensor(0.0, device=device)  # NEW: Penalty for not SELECTING tools
+        
+        # NEW: Check if tools were selected by the model (before execution)
+        # This penalizes the model for not selecting tools in the first place
+        if 'selected_tools' in model_outputs:
+            selected_tools_list = model_outputs['selected_tools']
+            for i, target in enumerate(targets):
+                expected_tools = set(target['expected_tools'])
+                # Check if model selected any tools
+                if i < len(selected_tools_list):
+                    selected = selected_tools_list[i] if isinstance(selected_tools_list[i], list) else []
+                    # VERY HEAVY penalty if NO tools were selected
+                    if len(selected) == 0 and len(expected_tools) > 0:
+                        tool_selection_penalty += 1.0  # VERY strong penalty (doubled)
+                    # Heavy penalty if only 1 tool selected
+                    elif len(selected) == 1 and len(expected_tools) > 1:
+                        tool_selection_penalty += 0.5  # Strong penalty
+                    # Moderate penalty if too few tools selected
+                    elif len(selected) < min(2, len(expected_tools)):
+                        tool_selection_penalty += 0.3
+            
+            if len(targets) > 0:
+                tool_selection_penalty = tool_selection_penalty / len(targets)
+                total_loss += 0.50 * tool_selection_penalty  # VERY strong weight for selection penalty (v10)
+                loss_components['tool_selection_penalty'] = tool_selection_penalty.item()
+        
         if 'tool_execution_success' in model_outputs and isinstance(model_outputs['tool_execution_success'], list):
             for i, target in enumerate(targets):
                 expected_tools = set(target['expected_tools'])
@@ -514,11 +664,18 @@ class IntegratedEnhancedTrainer:
                     for executed_tool, success in tool_success.items():
                         if executed_tool not in expected_tools and success:
                             tool_execution_loss += 0.05
+                    
+                    # NEW: Heavy penalty if NO tools were used at all
+                    if len(tool_success) == 0 and len(expected_tools) > 0:
+                        tool_usage_penalty += 0.3
             
             if len(targets) > 0:
                 tool_execution_loss = tool_execution_loss / len(targets)
+                tool_usage_penalty = tool_usage_penalty / len(targets)
                 total_loss += self.config.get('tool_execution_loss_weight', 0.20) * tool_execution_loss
+                total_loss += 0.25 * tool_usage_penalty  # NEW: Strong penalty for not using tools
                 loss_components['tool_execution_loss'] = tool_execution_loss.item()
+                loss_components['tool_usage_penalty'] = tool_usage_penalty.item()
         
         # 5. Semantic matching loss
         semantic_loss = self._compute_semantic_matching_loss(category_scores, targets)
@@ -664,9 +821,9 @@ class IntegratedEnhancedTrainer:
                             if tool_name not in expected_tools:
                                 tool_execution_reward -= 0.05  # Reduced from -0.1
                         
-                        elif tool_name == 'trend_analyzer':
+                        elif tool_name == 'trend_analysis':
                             tool_call = self.model.tool_registry.call_tool_by_name(
-                                'trend_analyzer', gifts=self.env.gift_catalog, user_age=user.age
+                                'trend_analysis', gifts=self.env.gift_catalog, user_age=user.age
                             )
                             result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
@@ -675,6 +832,18 @@ class IntegratedEnhancedTrainer:
                             # Negative reward if not expected
                             if tool_name not in expected_tools:
                                 tool_execution_reward -= 0.05  # Reduced from -0.1
+                        
+                        elif tool_name == 'budget_optimizer':
+                            tool_call = self.model.tool_registry.call_tool_by_name(
+                                'budget_optimizer', gifts=self.env.gift_catalog, budget=user.budget
+                            )
+                            result = tool_call.result if tool_call.success else None
+                            tool_results[tool_name] = result
+                            if result and len(result.get('optimized_gifts', [])) > 0:
+                                tool_execution_reward += 0.25
+                            # Negative reward if not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.05
                     except:
                         tool_execution_reward -= 0.05  # Penalty for failed execution
                         continue
@@ -778,6 +947,33 @@ class IntegratedEnhancedTrainer:
                 available_tools = self.available_tools_by_stage[self.curriculum_stage]
                 filtered_tools = [t for t in selected_tools if t in available_tools]
                 
+                # AGGRESSIVE EXPLORATION for underused tools (Stage 2+)
+                if self.curriculum_stage >= 2:
+                    # Find all underused tools (below threshold)
+                    underused_tools = [tool for tool in available_tools 
+                                      if self.tool_selection_counts.get(tool, 0) < self.exploration_bonus_threshold]
+                    
+                    if underused_tools:
+                        # Force exploration with higher probability
+                        if random.random() < self.force_exploration_prob:
+                            # Pick the LEAST used tool
+                            least_used_tool = min(underused_tools, key=lambda t: self.tool_selection_counts.get(t, 0))
+                            
+                            if least_used_tool not in filtered_tools:
+                                filtered_tools.append(least_used_tool)
+                                if batch_idx == 0 and i == 0:
+                                    print(f"  🔍 EXPLORATION: Forcing tool '{least_used_tool}' (count: {self.tool_selection_counts[least_used_tool]})")
+                        
+                        # ADDITIONAL: Force multiple underused tools if count is very low
+                        for tool in underused_tools:
+                            if self.tool_selection_counts.get(tool, 0) < 1000 and random.random() < 0.3:
+                                if tool not in filtered_tools:
+                                    filtered_tools.append(tool)
+                
+                # Update tool selection counts
+                for tool in filtered_tools:
+                    self.tool_selection_counts[tool] += 1
+                
                 # DEBUG: Log selected tools
                 if batch_idx == 0 and i == 0:
                     print(f"  🎯 Selected tools: {selected_tools}")
@@ -823,15 +1019,6 @@ class IntegratedEnhancedTrainer:
                             tool_results[tool_name] = result
                             tool_context['price_info'] = result
                             
-                            # DEBUG: Log tool execution details
-                            if batch_idx == 0 and i == 0:  # Only log first sample of first batch
-                                in_budget_count = len(result.get('in_budget', [])) if result else 0
-                                print(f"  🔧 price_comparison: budget={budget:.2f}, in_budget_count={in_budget_count}, success={tool_call.success}")
-                                if not tool_call.success:
-                                    print(f"     ❌ Error: {tool_call.error_message}")
-                                if result:
-                                    print(f"     📦 Total gifts: {len(self.env.gift_catalog)}, avg_price: {result.get('average_price', 0):.2f}")
-                            
                             # Positive reward for finding gifts in budget (increased from 0.2 to 0.3)
                             if result and len(result.get('in_budget', [])) > 0:
                                 tool_execution_reward += 0.3
@@ -861,11 +1048,6 @@ class IntegratedEnhancedTrainer:
                             result = tool_call.result if tool_call.success else None
                             tool_results[tool_name] = result
                             tool_context['review_info'] = result
-                            
-                            # DEBUG: Log tool execution details
-                            if batch_idx == 0 and i == 0:
-                                avg_rating = result.get('average_rating', 0) if result else 0
-                                print(f"  🔧 review_analysis: avg_rating={avg_rating:.2f}, success={tool_call.success}")
                             
                             # Positive reward for finding highly rated items (relaxed from 4.0 to 3.5, increased from 0.15 to 0.25)
                             if result and result.get('average_rating', 0) > 3.5:
@@ -898,9 +1080,9 @@ class IntegratedEnhancedTrainer:
                             if tool_name not in expected_tools:
                                 tool_execution_reward -= 0.05
                         
-                        elif tool_name == 'trend_analyzer':
+                        elif tool_name == 'trend_analysis':
                             tool_call = self.model.tool_registry.call_tool_by_name(
-                                'trend_analyzer',
+                                'trend_analysis',
                                 gifts=self.env.gift_catalog,
                                 user_age=user.age
                             )
@@ -919,9 +1101,28 @@ class IntegratedEnhancedTrainer:
                             if tool_name not in expected_tools:
                                 tool_execution_reward -= 0.05
                         
+                        elif tool_name == 'budget_optimizer':
+                            tool_call = self.model.tool_registry.call_tool_by_name(
+                                'budget_optimizer',
+                                gifts=self.env.gift_catalog,
+                                budget=user.budget
+                            )
+                            result = tool_call.result if tool_call.success else None
+                            tool_results[tool_name] = result
+                            tool_context['budget_info'] = result
+                            
+                            # Positive reward for optimizing budget
+                            if result and len(result.get('optimized_gifts', [])) > 0:
+                                tool_execution_reward += 0.25
+                                tool_execution_success[tool_name] = True
+                            else:
+                                tool_execution_success[tool_name] = False
+                            
+                            # Negative reward if tool was not expected
+                            if tool_name not in expected_tools:
+                                tool_execution_reward -= 0.05
+                        
                     except Exception as e:
-                        if batch_idx == 0 and i == 0:
-                            print(f"  ⚠️ Tool execution failed for {tool_name}: {e}")
                         tool_execution_success[tool_name] = False
                         # Penalty for failed execution
                         tool_execution_reward -= 0.05
@@ -934,11 +1135,6 @@ class IntegratedEnhancedTrainer:
                         # Bonus for successful multi-tool usage
                         tool_execution_reward += 0.15 * (len(successful_tools) - 1)
                 
-                # DEBUG: Log final reward
-                if batch_idx == 0 and i == 0:
-                    print(f"  💰 Tool execution reward: {tool_execution_reward:.3f}")
-                    print(f"  ✓ Tool success: {tool_execution_success}")
-                
                 # Encode tool results for future use
                 # Note: Tool feedback integration with carry state is prepared for future enhancement
                 if tool_results:
@@ -950,6 +1146,9 @@ class IntegratedEnhancedTrainer:
                 model_output['tool_results'] = tool_results
                 model_output['tool_execution_reward'] = tool_execution_reward
                 model_output['tool_execution_success'] = tool_execution_success
+                # NEW: Add selected_tools to track what model selected (before filtering)
+                model_output['selected_tools_raw'] = selected_tools  # Raw selection from model
+                model_output['selected_tools'] = filtered_tools  # After curriculum filtering
                 
                 batch_outputs.append(model_output)
                 batch_tool_rewards.append(tool_execution_reward)
@@ -991,9 +1190,9 @@ class IntegratedEnhancedTrainer:
             
             # Update weights every accumulation_steps
             if (batch_idx + 1) % accumulation_steps == 0:
-                # Gradient clipping for both model and tool encoder (increased from 1.0 to 2.0)
+                # Gradient clipping for both model and tool encoder (INCREASED to 5.0 for faster learning)
                 all_params = list(self.model.parameters()) + list(self.tool_result_encoder.parameters())
-                torch.nn.utils.clip_grad_norm_(all_params, max_norm=2.0)
+                torch.nn.utils.clip_grad_norm_(all_params, max_norm=5.0)  # Increased from 2.0 to 5.0
                 
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -1019,24 +1218,55 @@ class IntegratedEnhancedTrainer:
             if values:
                 epoch_metrics[key] = np.mean(values)
         
+        # Log tool selection counts (Stage 3 and 4)
+        if self.curriculum_stage >= 3:
+            print(f"\n📊 Tool Selection Counts (Epoch {epoch}):")
+            for tool_name, count in sorted(self.tool_selection_counts.items(), key=lambda x: x[1], reverse=True):
+                if tool_name in self.available_tools_by_stage[3]:
+                    print(f"   {tool_name}: {count}")
+        
         return epoch_metrics
     
-    def train(self, num_epochs: int = 100, eval_frequency: int = 10, start_epoch: int = 0):
-        """Main training loop with early stopping, LR scheduling, and curriculum learning"""
-        print(f"🚀 Starting training for {num_epochs} epochs (starting from epoch {start_epoch})")
+    def train(self, num_epochs: int = 150, eval_frequency: int = 5, start_epoch: int = 0):
+        """Main training loop with ADAPTIVE curriculum, early stopping, and LR scheduling"""
+        # Calculate actual end epoch
+        end_epoch = start_epoch + num_epochs
+        print(f"🚀 Starting training for {num_epochs} epochs (epoch {start_epoch} to {end_epoch})")
         print(f"📊 Early stopping patience: {self.early_stopping_patience} epochs")
         print(f"📚 Curriculum learning enabled with {len(self.available_tools_by_stage)} stages")
         
-        for epoch in range(start_epoch, num_epochs):
-            # Update curriculum stage based on epoch (slower progression for better stability)
-            if epoch < 15:
+        for epoch in range(start_epoch, end_epoch):
+            # ADAPTIVE curriculum stage progression based on tool usage
+            old_stage = self.curriculum_stage
+            
+            if epoch < 10:
                 self.curriculum_stage = 0
-            elif epoch < 35:
+            elif epoch < 25:
                 self.curriculum_stage = 1
-            elif epoch < 60:
+            elif epoch < 45:
                 self.curriculum_stage = 2
             else:
-                self.curriculum_stage = 3
+                # For Stage 3+, check if tools are being used enough before advancing
+                current_stage_tools = self.available_tools_by_stage[self.curriculum_stage]
+                min_usage = min([self.tool_selection_counts.get(tool, 0) for tool in current_stage_tools])
+                
+                # Only advance if minimum tool usage threshold is met OR enough epochs have passed
+                epochs_in_stage = epoch - self.stage_start_epochs.get(self.curriculum_stage, epoch)
+                
+                stage_timeout = self.config.get('stage_timeout_epochs', 35)
+                
+                if self.curriculum_stage == 2 and (min_usage >= self.min_tool_usage_per_stage or epochs_in_stage >= stage_timeout):
+                    self.curriculum_stage = 3
+                elif self.curriculum_stage == 3 and (min_usage >= self.min_tool_usage_per_stage or epochs_in_stage >= stage_timeout + 5):
+                    self.curriculum_stage = 4
+                elif self.curriculum_stage < 2:
+                    self.curriculum_stage = 2
+            
+            # Track stage changes
+            if old_stage != self.curriculum_stage:
+                self.stage_start_epochs[self.curriculum_stage] = epoch
+                print(f"\n🎓 CURRICULUM STAGE ADVANCED: {old_stage} → {self.curriculum_stage}")
+                print(f"   New tools available: {self.available_tools_by_stage[self.curriculum_stage]}")
             
             available_tools = self.available_tools_by_stage[self.curriculum_stage]
             print(f"\n📚 Epoch {epoch + 1}/{num_epochs} - Curriculum Stage {self.curriculum_stage} - Tools: {available_tools}")
@@ -1065,9 +1295,11 @@ class IntegratedEnhancedTrainer:
                 # Update learning rate scheduler
                 self.scheduler.step(train_metrics.get('total_loss', 0))
                 
-                # Check for improvement
+                # Check for improvement with SMALLER threshold
                 current_score = eval_metrics['recommendation_quality']
-                if current_score > self.best_eval_score:
+                improvement_threshold = self.config.get('improvement_threshold', 0.001)  # Consider 0.1% improvement as progress
+                
+                if current_score > self.best_eval_score + improvement_threshold:
                     self.best_eval_score = current_score
                     self.patience_counter = 0
                     self.save_model(f"integrated_enhanced_best.pt", epoch, eval_metrics)
@@ -1076,11 +1308,18 @@ class IntegratedEnhancedTrainer:
                     self.patience_counter += 1
                     print(f"⏳ No improvement for {self.patience_counter} evaluation(s)")
                 
-                # Early stopping check
+                # Early stopping check - MORE LENIENT
                 if self.patience_counter >= self.early_stopping_patience // eval_frequency:
-                    print(f"🛑 Early stopping triggered after {epoch + 1} epochs")
-                    print(f"🏆 Best score achieved: {self.best_eval_score:.3f}")
-                    break
+                    # Don't stop if we're in early stages or just advanced curriculum
+                    epochs_in_current_stage = epoch - self.stage_start_epochs.get(self.curriculum_stage, 0)
+                    
+                    if self.curriculum_stage < 3 or epochs_in_current_stage < 15:
+                        print(f"⏰ Early stopping delayed - still in curriculum stage {self.curriculum_stage}")
+                        self.patience_counter = self.patience_counter // 2  # Reset partially
+                    else:
+                        print(f"🛑 Early stopping triggered after {epoch + 1} epochs")
+                        print(f"🏆 Best score achieved: {self.best_eval_score:.3f}")
+                        break
             
             # Save checkpoint
             if (epoch + 1) % 25 == 0:
@@ -1093,7 +1332,8 @@ class IntegratedEnhancedTrainer:
         print(f"📂 Loading model from {filepath}")
         checkpoint = torch.load(filepath, map_location=self.device)
         
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        # Load with strict=True to ensure architecture matches
+        self.model.load_state_dict(checkpoint['model_state_dict'], strict=True)
         
         # Load tool result encoder if available
         if 'tool_result_encoder_state_dict' in checkpoint:
@@ -1159,38 +1399,51 @@ def main():
                        help='Number of epochs to train')
     parser.add_argument('--batch_size', type=int, default=16,
                        help='Batch size for training')
+    parser.add_argument('--use_synthetic_data', action='store_true',
+                       help='Use synthetic data for training')
+    parser.add_argument('--synthetic_ratio', type=float, default=0.5,
+                       help='Ratio of synthetic data in batches (0.0-1.0, default: 0.5)')
     args = parser.parse_args()
     
     print("🚀 INTEGRATED ENHANCED TRM TRAINING")
     print("=" * 60)
     
+    if args.use_synthetic_data:
+        print(f"🤖 Sentetik veri modu aktif - Oran: {args.synthetic_ratio:.1%}")
+    
     # Create enhanced configuration
     config = create_integrated_enhanced_config()
     
-    # Add training-specific parameters (optimized v5 - tool execution focused)
+    # Add training-specific parameters (optimized v11 - BALANCED & STABLE)
     config.update({
         'batch_size': args.batch_size,
         'num_epochs': args.epochs,
         'eval_frequency': 5,  # More frequent evaluation
         'early_stopping_patience': 40,  # Increased patience to allow for recovery
         'user_profile_lr': 1.2e-4,
-        'category_matching_lr': 2.0e-4,  # Increased to help category convergence
-        'tool_selection_lr': 2e-4,
+        'category_matching_lr': 4.0e-4,  # Strong category learning
+        'tool_selection_lr': 3.0e-4,  # BALANCED: Reduced from 6e-4 for stability
         'reward_prediction_lr': 2.5e-4,
         'main_lr': 1.2e-4,
         'weight_decay': 0.015,
-        'category_loss_weight': 0.35,  # Increased to stabilize category prediction
-        'tool_diversity_loss_weight': 0.20,
-        'tool_execution_loss_weight': 0.30,  # Slightly reduced to balance with category
-        'reward_loss_weight': 0.15,  # Slightly increased
-        'semantic_matching_loss_weight': 0.10,
+        'category_loss_weight': 0.70,  # INCREASED: Prioritize main task (was 0.50)
+        'tool_diversity_loss_weight': 0.40,  # BALANCED: Increased from 0.25 to prevent mode collapse
+        'tool_execution_loss_weight': 0.20,  # BALANCED: Moderate penalty (was 0.10)
+        'reward_loss_weight': 0.18,  # Kept same
+        'semantic_matching_loss_weight': 0.12,  # Kept same
         'embedding_reg_weight': 1.5e-5,
-        'tool_encoder_lr': 2e-4,
-        'hidden_dim': 128
+        'tool_encoder_lr': 3.0e-4,  # BALANCED: Reduced from 5e-4
+        'hidden_dim': 128,
+        'improvement_threshold': 0.001,
+        'stage_timeout_epochs': 35
     })
     
-    # Initialize trainer
-    trainer = IntegratedEnhancedTrainer(config)
+    # Initialize trainer with synthetic data support
+    trainer = IntegratedEnhancedTrainer(
+        config, 
+        use_synthetic_data=args.use_synthetic_data,
+        synthetic_ratio=args.synthetic_ratio
+    )
     
     # Resume from checkpoint if specified
     start_epoch = 0

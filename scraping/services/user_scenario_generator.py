@@ -16,6 +16,8 @@ try:
 except ImportError:
     genai = None
 
+from ..utils.cache_manager import CacheManager
+
 
 class UserScenarioGenerator:
     """Generates realistic user scenarios for gift recommendation testing"""
@@ -36,10 +38,25 @@ class UserScenarioGenerator:
         # Load gift catalog
         self.gift_catalog = self._load_gift_catalog()
         
+        # Extract dynamic keywords from catalog
+        self._extract_dynamic_keywords()
+        
         # Configuration
         self.max_requests = config.get('max_requests_per_day', 1000)
         self.retry_attempts = config.get('retry_attempts', 3)
         self.retry_delay = config.get('retry_delay', 2)
+        
+        # Optimization parameters
+        self.batch_size = config.get('scenario_batch_size', 10)  # Generate N scenarios per API call
+        self.ai_ratio = config.get('scenario_ai_ratio', 0.2)  # Use AI for X% of scenarios
+        
+        # Cache manager
+        self.use_cache = config.get('scenario_use_cache', True)
+        if self.use_cache:
+            self.cache_manager = CacheManager()
+            self.logger.info(f"Cache manager enabled for scenarios (batch_size={self.batch_size}, ai_ratio={self.ai_ratio})")
+        else:
+            self.cache_manager = None
         
         # Request tracking
         self.request_count = 0
@@ -79,10 +96,80 @@ class UserScenarioGenerator:
         except Exception as e:
             self.logger.error(f"Failed to load gift catalog: {e}")
             return {"gifts": [], "metadata": {}}
+    
+    def _extract_dynamic_keywords(self) -> None:
+        """
+        Extract dynamic keywords from gift catalog tags and categories
+        Categorizes tags into trend, tech, quality, and value keywords
+        """
+        gifts = self.gift_catalog.get('gifts', [])
+        categories = self.gift_catalog.get('metadata', {}).get('categories', [])
+        
+        # Collect all tags from catalog
+        all_tags = set()
+        for gift in gifts:
+            all_tags.update(gift.get('tags', []))
+        
+        # Convert to lowercase for matching
+        all_tags_lower = {tag.lower() for tag in all_tags}
+        categories_lower = {cat.lower() for cat in categories}
+        
+        # Define base patterns for categorization
+        trend_patterns = ['trendy', 'modern', 'innovative', 'new', 'latest', 'smart', 
+                         'digital', 'tech', 'advanced', 'contemporary']
+        tech_patterns = ['technology', 'electronic', 'digital', 'smart', 'wireless',
+                        'bluetooth', 'usb', 'gaming', 'computer', 'phone', 'gadget']
+        quality_patterns = ['luxury', 'premium', 'quality', 'expensive', 'high-end',
+                           'designer', 'exclusive', 'elegant', 'sophisticated']
+        value_patterns = ['affordable', 'cheap', 'discount', 'deal', 'value', 
+                         'budget', 'economical', 'bargain']
+        
+        # Match tags with patterns
+        self.trend_keywords = []
+        self.tech_keywords = []
+        self.quality_keywords = []
+        self.value_keywords = []
+        
+        for tag in all_tags_lower:
+            # Check trend patterns
+            if any(pattern in tag for pattern in trend_patterns):
+                self.trend_keywords.append(tag)
+            # Check tech patterns
+            if any(pattern in tag for pattern in tech_patterns):
+                self.tech_keywords.append(tag)
+            # Check quality patterns
+            if any(pattern in tag for pattern in quality_patterns):
+                self.quality_keywords.append(tag)
+            # Check value patterns
+            if any(pattern in tag for pattern in value_patterns):
+                self.value_keywords.append(tag)
+        
+        # Add relevant categories to tech keywords
+        tech_categories = ['technology', 'electronics', 'gaming', 'digital']
+        for cat in categories_lower:
+            if any(tech_cat in cat for tech_cat in tech_categories):
+                self.tech_keywords.append(cat)
+        
+        # Remove duplicates and ensure we have fallbacks
+        self.trend_keywords = list(set(self.trend_keywords)) or ['modern', 'trendy']
+        self.tech_keywords = list(set(self.tech_keywords)) or ['technology', 'electronic']
+        self.quality_keywords = list(set(self.quality_keywords)) or ['premium', 'quality']
+        self.value_keywords = list(set(self.value_keywords)) or ['affordable', 'value']
+        
+        self.logger.info(f"Extracted dynamic keywords:")
+        self.logger.info(f"  Trend: {len(self.trend_keywords)} keywords")
+        self.logger.info(f"  Tech: {len(self.tech_keywords)} keywords")
+        self.logger.info(f"  Quality: {len(self.quality_keywords)} keywords")
+        self.logger.info(f"  Value: {len(self.value_keywords)} keywords")
 
     async def generate_scenarios(self, num_scenarios: int = 100) -> List[Dict[str, Any]]:
         """
-        Generate user scenarios
+        Generate user scenarios with optimized API usage
+        
+        Optimization strategies:
+        1. Batch processing: Generate multiple scenarios per API call
+        2. AI ratio: Use AI for only a percentage of scenarios
+        3. Caching: Reuse similar scenario profiles
         
         Args:
             num_scenarios: Number of scenarios to generate
@@ -91,6 +178,7 @@ class UserScenarioGenerator:
             List of user scenario dictionaries
         """
         self.logger.info(f"Generating {num_scenarios} user scenarios...")
+        self.logger.info(f"Optimization: batch_size={self.batch_size}, ai_ratio={self.ai_ratio*100:.0f}%")
         
         # Get delay from config
         batch_delay = self.config.get('batch_delay', 5)
@@ -105,23 +193,48 @@ class UserScenarioGenerator:
         
         self.logger.info(f"Extracted from catalog: {len(categories)} categories, {len(tags)} tags, {len(occasions)} occasions")
         
-        for i in range(num_scenarios):
-            if self.enabled and self.request_count < self.max_requests:
-                scenario = await self._generate_ai_scenario(i, categories, tags, occasions, price_ranges)
-                
-                # Wait between AI requests to avoid rate limits
-                if scenario and i < num_scenarios - 1:
-                    await asyncio.sleep(batch_delay)
-            else:
-                scenario = self._generate_fallback_scenario(i, categories, tags, occasions, price_ranges)
+        # Calculate how many scenarios to generate with AI vs fallback
+        num_ai_scenarios = int(num_scenarios * self.ai_ratio)
+        num_fallback_scenarios = num_scenarios - num_ai_scenarios
+        
+        self.logger.info(f"Strategy: {num_ai_scenarios} AI scenarios, {num_fallback_scenarios} fallback scenarios")
+        
+        # Generate AI scenarios in batches
+        if self.enabled and num_ai_scenarios > 0 and self.request_count < self.max_requests:
+            num_batches = (num_ai_scenarios + self.batch_size - 1) // self.batch_size
+            self.logger.info(f"Generating {num_ai_scenarios} AI scenarios in {num_batches} batches...")
             
+            for batch_idx in range(num_batches):
+                # Calculate scenarios for this batch
+                start_idx = batch_idx * self.batch_size
+                end_idx = min(start_idx + self.batch_size, num_ai_scenarios)
+                batch_count = end_idx - start_idx
+                
+                # Generate batch
+                batch_scenarios = await self._generate_ai_scenario_batch(
+                    start_idx, batch_count, categories, tags, occasions, price_ranges
+                )
+                
+                if batch_scenarios:
+                    scenarios.extend(batch_scenarios)
+                    self.logger.info(f"Batch {batch_idx + 1}/{num_batches}: Generated {len(batch_scenarios)} scenarios")
+                
+                # Wait between batches to avoid rate limits
+                if batch_idx < num_batches - 1:
+                    await asyncio.sleep(batch_delay)
+        
+        # Generate remaining scenarios with fallback
+        self.logger.info(f"Generating {num_fallback_scenarios} fallback scenarios...")
+        for i in range(num_fallback_scenarios):
+            scenario = self._generate_fallback_scenario(
+                len(scenarios) + i, categories, tags, occasions, price_ranges
+            )
             if scenario:
                 scenarios.append(scenario)
-            
-            if (i + 1) % 10 == 0:
-                self.logger.info(f"Generated {i + 1}/{num_scenarios} scenarios")
         
         self.logger.info(f"Scenario generation complete: {len(scenarios)} scenarios")
+        self.logger.info(f"API calls made: {self.request_count} (saved ~{num_scenarios - self.request_count} calls)")
+        
         return scenarios
 
     def _extract_categories(self) -> List[str]:
@@ -171,6 +284,136 @@ class UserScenarioGenerator:
             'high': (min_price + 2 * range_size, min_price + 3 * range_size),
             'premium': (min_price + 3 * range_size, max_price)
         }
+
+    async def _generate_ai_scenario_batch(self, start_index: int, batch_count: int,
+                                          categories: List[str], tags: List[str], 
+                                          occasions: List[str], price_ranges: Dict[str, tuple]) -> List[Dict[str, Any]]:
+        """
+        Generate multiple scenarios in a single API call
+        
+        This is the KEY optimization - instead of 1 API call per scenario,
+        we generate N scenarios per API call, reducing API usage by N times.
+        
+        Args:
+            start_index: Starting index for scenario IDs
+            batch_count: Number of scenarios to generate in this batch
+            categories, tags, occasions, price_ranges: Catalog data
+            
+        Returns:
+            List of generated scenarios
+        """
+        # Build batch prompt
+        prompt = self._build_batch_scenario_prompt(batch_count, categories, tags, occasions, price_ranges)
+        
+        # Try with retries
+        for attempt in range(self.retry_attempts):
+            try:
+                response = await asyncio.to_thread(
+                    self.model.generate_content,
+                    prompt
+                )
+                
+                scenarios = self._parse_batch_scenario_response(response.text, start_index, batch_count)
+                self.request_count += 1
+                
+                if scenarios:
+                    self.logger.info(f"✅ Batch API call successful: {len(scenarios)} scenarios generated")
+                    return scenarios
+                
+            except Exception as e:
+                self.logger.error(f"Gemini API error (attempt {attempt + 1}): {e}")
+                if attempt < self.retry_attempts - 1:
+                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+        
+        # Fallback: generate scenarios individually using fallback method
+        self.logger.warning(f"Batch generation failed, using fallback for {batch_count} scenarios")
+        fallback_scenarios = []
+        for i in range(batch_count):
+            scenario = self._generate_fallback_scenario(
+                start_index + i, categories, tags, occasions, price_ranges
+            )
+            if scenario:
+                fallback_scenarios.append(scenario)
+        
+        return fallback_scenarios
+
+    def _build_batch_scenario_prompt(self, batch_count: int, categories: List[str], 
+                                     tags: List[str], occasions: List[str], 
+                                     price_ranges: Dict[str, tuple]) -> str:
+        """Build prompt for batch scenario generation"""
+        
+        # Sample from available data
+        sample_categories = random.sample(categories, min(10, len(categories)))
+        sample_tags = random.sample(tags, min(15, len(tags)))
+        sample_occasions = occasions if len(occasions) <= 10 else random.sample(occasions, 10)
+        
+        # Get price range info
+        price_info = f"{price_ranges['low'][0]:.0f}-{price_ranges['premium'][1]:.0f}"
+        
+        return f"""Generate {batch_count} DIVERSE, realistic user profiles for gift recommendation testing based on REAL scraped data.
+
+REAL Available Categories: {', '.join(sample_categories)}
+REAL Available Tags/Interests: {', '.join(sample_tags)}
+REAL Available Occasions: {', '.join(sample_occasions)}
+REAL Price Range: {price_info} TL
+
+Create {batch_count} DIFFERENT people with VARIED characteristics:
+- Age (16-70) - VARY the ages across the batch
+- 2-4 hobbies/interests ONLY from the available tags above - VARY the combinations
+- Relationship to gift recipient (friend, mother, father, sister, brother, colleague, spouse, uncle, aunt, cousin, grandparent)
+- Budget in TL (within the real price range above) - VARY budget levels
+- Occasion ONLY from the available occasions above - VARY occasions
+- 2-4 preferences that match the available tags
+
+IMPORTANT: Make each profile UNIQUE and DIVERSE. Vary age groups, budget levels, interests, and occasions.
+
+Return ONLY valid JSON array:
+[
+  {{
+    "age": <number>,
+    "hobbies": [<list of 2-4 hobbies from available tags>],
+    "relationship": "<relationship>",
+    "budget": <number within real price range>,
+    "occasion": "<occasion from available occasions>",
+    "preferences": [<list of 2-4 preferences from available tags>]
+  }},
+  ... ({batch_count} profiles total)
+]"""
+
+    def _parse_batch_scenario_response(self, response: str, start_index: int, 
+                                       expected_count: int) -> List[Dict[str, Any]]:
+        """Parse batch Gemini response into multiple scenarios"""
+        try:
+            # Extract JSON array from response
+            start = response.find('[')
+            end = response.rfind(']') + 1
+            
+            if start != -1 and end != 0:
+                json_str = response[start:end]
+                profiles = json.loads(json_str)
+                
+                if not isinstance(profiles, list):
+                    self.logger.warning("Response is not a list")
+                    return []
+                
+                # Build scenarios from profiles
+                scenarios = []
+                for idx, profile in enumerate(profiles):
+                    scenario = {
+                        "id": f"scenario_{start_index + idx:04d}",
+                        "profile": profile,
+                        "expected_categories": self._infer_categories(profile),
+                        "expected_tools": self._infer_tools(profile)
+                    }
+                    scenarios.append(scenario)
+                
+                self.logger.info(f"Parsed {len(scenarios)}/{expected_count} scenarios from batch response")
+                return scenarios
+                
+        except Exception as e:
+            self.logger.warning(f"Failed to parse batch scenario response: {e}")
+        
+        return []
 
     async def _generate_ai_scenario(self, index: int, categories: List[str], 
                                    tags: List[str], occasions: List[str], 
@@ -374,33 +617,58 @@ Return ONLY valid JSON:
         return list(set(categories))[:3]  # Max 3 categories
 
     def _infer_tools(self, profile: Dict[str, Any]) -> List[str]:
-        """Infer expected tools based on profile"""
+        """
+        Infer expected tools based on profile characteristics
+        
+        Tool selection logic:
+        - budget_optimizer: Low budget users (< 200 TL)
+        - price_comparison: Budget-conscious users (< 300 TL) or value seekers
+        - review_analysis: Quality-focused, luxury seekers, or high-budget users
+        - trend_analysis: Tech-savvy, modern, trendy interests
+        - inventory_check: Technology/electronics interests
+        
+        Uses dynamically extracted keywords from gift catalog
+        """
         tools = []
         
         budget = profile.get('budget', 100)
         preferences = profile.get('preferences', [])
         hobbies = profile.get('hobbies', [])
+        all_interests = [str(p).lower() for p in preferences + hobbies]
         
         # Budget-based tools
-        if budget < 100:
-            tools.append('budget_optimizer')
+        if budget < 200:
+            # Low budget: need optimization and price comparison
+            tools.extend(['budget_optimizer', 'price_comparison'])
+        elif budget < 300:
+            # Medium budget: price comparison helpful
+            tools.append('price_comparison')
+        elif budget > 500:
+            # High budget: quality matters more than price
+            tools.append('review_analysis')
         
-        # Always useful tools - TÜM 4 ARACI EKLE
-        tools.extend(['review_analysis', 'price_comparison', 'inventory_check', 'trend_analyzer'])
+        # Trend-conscious users (using dynamic keywords from catalog)
+        if any(keyword in interest for keyword in self.trend_keywords for interest in all_interests):
+            tools.append('trend_analysis')
         
-        # Preference-based tools (ek olarak)
-        if any(p in ['trendy', 'tech-savvy', 'modern', 'innovative'] for p in preferences + hobbies):
-            # trend_analyzer zaten eklendi, tekrar eklemeye gerek yok
-            pass
+        # Technology/electronics: inventory important (using dynamic keywords from catalog)
+        if any(keyword in interest for keyword in self.tech_keywords for interest in all_interests):
+            tools.append('inventory_check')
         
-        if any(p in ['luxury', 'premium', 'expensive'] for p in preferences + hobbies):
-            # price_comparison zaten eklendi
-            pass
+        # Quality-focused users (using dynamic keywords from catalog)
+        if any(keyword in interest for keyword in self.quality_keywords for interest in all_interests):
+            tools.append('review_analysis')
         
-        # Stok kontrolü önemli olan kategoriler için
-        if any(p in ['technology', 'electronics', 'digital', 'smart'] for p in preferences + hobbies):
-            # inventory_check zaten eklendi
-            pass
+        # Value seekers (using dynamic keywords from catalog)
+        if any(keyword in interest for keyword in self.value_keywords for interest in all_interests):
+            if 'price_comparison' not in tools:
+                tools.append('price_comparison')
+            if 'budget_optimizer' not in tools and budget < 300:
+                tools.append('budget_optimizer')
+        
+        # Ensure at least one tool is selected (default to price_comparison)
+        if not tools:
+            tools.append('price_comparison')
         
         return list(set(tools))
 

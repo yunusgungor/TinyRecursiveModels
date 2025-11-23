@@ -34,10 +34,10 @@ class IntegratedEnhancedTRMConfig(RLTRMConfig):
     tool_context_encoding_dim: int = 128
     tool_selection_heads: int = 4
     max_tool_calls_per_step: int = 2
-    tool_diversity_weight: float = 0.3
+    tool_diversity_weight: float = 0.25  # BALANCED: Reduced from 0.4/0.55 to allow natural distribution
     
     # Tool-specific parameters (from tool_enhanced_trm)
-    tool_call_threshold: float = 0.5  # Minimum confidence to call tool
+    tool_call_threshold: float = 0.15  # BALANCED: Low enough to encourage usage, high enough to filter noise
     tool_result_encoding_dim: int = 128
     tool_selection_method: str = "confidence"  # "confidence", "random", "round_robin"
     tool_fusion_method: str = "concatenate"  # "concatenate", "attention", "gating"
@@ -407,7 +407,9 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         
         # Tool fusion projection layers
         self.tool_projection_layer = None  # Will be created dynamically
-        self.fusion_projection_layer = None  # Will be created dynamically
+        # Fusion projection layer for checkpoint compatibility (512 -> 256)
+        # Maps concatenated user+gift projections to user encoding dimension
+        self.fusion_projection_layer = nn.Linear(512, 256)
         
         # Tool call history
         self.tool_call_history = []
@@ -559,7 +561,7 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
     
     def enhanced_tool_selection(self, user_encoding: torch.Tensor, 
                               category_scores: torch.Tensor) -> Tuple[List[str], torch.Tensor]:
-        """Perform enhanced context-aware tool selection"""
+        """Perform enhanced context-aware tool selection with improved selection strategy"""
         device = user_encoding.device
         
         # Encode context for tool selection
@@ -570,30 +572,43 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
             tool_context, tool_context, tool_context
         )
         
-        # Get tool diversity scores (already has softmax, outputs sum to 1)
+        # Get tool diversity scores (softmax outputs sum to 1)
         tool_scores = self.tool_diversity_head(tool_attended.squeeze(1))
         
-        # Select tools with threshold (lowered for softmax distribution)
-        # With 5 tools, average score is 0.2, so threshold of 0.15 allows selection
+        # BALANCED STRATEGY: Smart Thresholding with Fallback
+        # Addresses "Unnecessary Usage" vs "Tool Silence" trade-off
         tool_names = list(self.tool_registry.list_tools())
         selected_tools = []
-        threshold = 0.15  # Lowered from 0.5 to work with softmax probabilities
+        
+        # Threshold for confident selection
+        threshold = self.enhanced_config.tool_call_threshold  # 0.15
         
         for batch_idx in range(tool_scores.size(0)):
             batch_tools = []
-            # Get scores for this batch
             batch_scores = tool_scores[batch_idx]
             
-            # Select top scoring tools above threshold, up to max_tool_calls_per_step
-            # Sort by score descending
+            # 1. Primary Selection: Select all tools above threshold
+            # Sort by score descending to prioritize best matches
             sorted_indices = torch.argsort(batch_scores, descending=True)
             
             for tool_idx in sorted_indices:
                 score = batch_scores[tool_idx]
                 if score > threshold and tool_idx < len(tool_names):
                     batch_tools.append(tool_names[tool_idx])
+                    # Cap at max tools per step
                     if len(batch_tools) >= self.enhanced_config.max_tool_calls_per_step:
                         break
+            
+            # 2. Fallback Selection (Anti-Silence):
+            # If no tools selected, pick the top one IF it has at least minimal relevance
+            # This prevents "silence" but avoids forcing completely irrelevant tools
+            if not batch_tools and len(tool_names) > 0:
+                top_idx = sorted_indices[0]
+                top_score = batch_scores[top_idx]
+                
+                # Minimal relevance check (very low bar, just to filter noise)
+                if top_score > 0.05:
+                    batch_tools.append(tool_names[top_idx])
             
             selected_tools.append(batch_tools)
         
@@ -961,6 +976,7 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         device = next(self.parameters()).device
         tool_calls = []
         tool_encodings = []
+        used_tool_names = set()
         
         max_calls = max_tool_calls or self.enhanced_config.max_tool_calls_per_step
         
@@ -972,20 +988,43 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
             # Decide if we should use a tool
             tool_usage_prob = self.tool_usage_predictor(user_encoding).item()
             
-            if tool_usage_prob < 0.5:  # Threshold
+            if tool_usage_prob < 0.1:  # Threshold lowered to encourage exploration
                 break
             
             # Enhanced tool selection
             category_scores = self.enhanced_category_matching(user_encoding)
             selected_tools, tool_scores = self.enhanced_tool_selection(user_encoding, category_scores)
             
+            # EXPLORATION: Epsilon-greedy strategy during training
+            # This forces the model to try new tools (like budget_optimizer) that might have low initial scores
+            is_exploration = False
+            if self.training and torch.rand(1).item() < 0.15:  # 15% exploration rate
+                all_tools = list(self.tool_registry.list_tools())
+                # Filter out already used tools
+                available_candidates = [t for t in all_tools if t not in used_tool_names]
+                if available_candidates:
+                    # Pick random tool
+                    import random
+                    random_tool = random.choice(available_candidates)
+                    # Override selection
+                    selected_tools = [[random_tool]]
+                    is_exploration = True
+            
             if not selected_tools or not selected_tools[0]:
                 break
             
-            # Get first tool
-            tool_name = selected_tools[0][0] if selected_tools[0] else None
+            # Get first NEW tool (avoid duplicates in sequential calls)
+            tool_name = None
+            if selected_tools and selected_tools[0]:
+                for candidate_tool in selected_tools[0]:
+                    if candidate_tool not in used_tool_names:
+                        tool_name = candidate_tool
+                        break
+            
             if not tool_name:
                 break
+            
+            used_tool_names.add(tool_name)
             
             # Get tool parameters
             tool_params_dict = {}
