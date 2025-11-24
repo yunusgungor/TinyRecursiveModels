@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     MODEL_DEVICE: str = "cuda"  # cuda or cpu
     MODEL_INFERENCE_TIMEOUT: int = 5  # seconds
     
+    # Reasoning Settings
+    REASONING_ENABLED: bool = True
+    REASONING_DEFAULT_LEVEL: str = "basic"  # basic, detailed, or full
+    REASONING_MAX_THINKING_STEPS: int = 20
+    REASONING_TIMEOUT_SECONDS: float = 2.0
+    REASONING_MAX_TRACE_SIZE: int = 10000  # characters
+    
     # Trendyol API Settings
     TRENDYOL_API_KEY: str = ""
     TRENDYOL_API_BASE_URL: str = "https://api.trendyol.com"

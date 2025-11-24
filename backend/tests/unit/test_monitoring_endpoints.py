@@ -4,23 +4,19 @@ import pytest
 from fastapi.testclient import TestClient
 from datetime import datetime
 
-from app.main import app
 from app.services.monitoring_service import monitoring_service
-
-
-client = TestClient(app)
 
 
 class TestHealthEndpoint:
     """Test health check endpoint"""
     
-    def test_health_check_returns_200(self):
+    def test_health_check_returns_200(self, client):
         """Test that health check returns 200 status"""
         response = client.get("/api/health")
         
         assert response.status_code == 200
     
-    def test_health_check_response_structure(self):
+    def test_health_check_response_structure(self, client):
         """Test health check response has correct structure"""
         response = client.get("/api/health")
         data = response.json()
@@ -31,7 +27,7 @@ class TestHealthEndpoint:
         assert "cache_status" in data
         assert "timestamp" in data
     
-    def test_health_check_status_values(self):
+    def test_health_check_status_values(self, client):
         """Test health check status has valid values"""
         response = client.get("/api/health")
         data = response.json()
@@ -41,7 +37,7 @@ class TestHealthEndpoint:
         assert data["trendyol_api_status"] in ["healthy", "unhealthy", "unknown"]
         assert data["cache_status"] in ["healthy", "unhealthy", "unknown"]
     
-    def test_health_check_timestamp_format(self):
+    def test_health_check_timestamp_format(self, client):
         """Test health check timestamp is valid ISO format"""
         response = client.get("/api/health")
         data = response.json()
@@ -54,19 +50,19 @@ class TestHealthEndpoint:
 class TestMetricsEndpoint:
     """Test Prometheus metrics endpoint"""
     
-    def test_metrics_returns_200(self):
+    def test_metrics_returns_200(self, client):
         """Test that metrics endpoint returns 200 status"""
         response = client.get("/api/metrics")
         
         assert response.status_code == 200
     
-    def test_metrics_content_type(self):
+    def test_metrics_content_type(self, client):
         """Test metrics endpoint returns correct content type"""
         response = client.get("/api/metrics")
         
         assert "text/plain" in response.headers["content-type"]
     
-    def test_metrics_format(self):
+    def test_metrics_format(self, client):
         """Test metrics are in Prometheus format"""
         response = client.get("/api/metrics")
         content = response.text
@@ -76,7 +72,7 @@ class TestMetricsEndpoint:
         assert "memory_usage_percent" in content
         assert "model_loaded" in content
     
-    def test_metrics_with_tool_data(self):
+    def test_metrics_with_tool_data(self, client):
         """Test metrics include tool data when available"""
         # Record some tool execution
         monitoring_service.metrics_collector.record_tool_execution(
@@ -93,13 +89,13 @@ class TestMetricsEndpoint:
 class TestResourcesEndpoint:
     """Test resources endpoint"""
     
-    def test_resources_returns_200(self):
+    def test_resources_returns_200(self, client):
         """Test that resources endpoint returns 200 status"""
         response = client.get("/api/resources")
         
         assert response.status_code == 200
     
-    def test_resources_response_structure(self):
+    def test_resources_response_structure(self, client):
         """Test resources response has correct structure"""
         response = client.get("/api/resources")
         data = response.json()
@@ -108,7 +104,7 @@ class TestResourcesEndpoint:
         assert "memory" in data
         assert "timestamp" in data
     
-    def test_resources_memory_structure(self):
+    def test_resources_memory_structure(self, client):
         """Test memory information has correct structure"""
         response = client.get("/api/resources")
         data = response.json()
@@ -119,7 +115,7 @@ class TestResourcesEndpoint:
         assert "available_mb" in memory
         assert "percent" in memory
     
-    def test_resources_values_valid(self):
+    def test_resources_values_valid(self, client):
         """Test resource values are valid"""
         response = client.get("/api/resources")
         data = response.json()
@@ -132,13 +128,13 @@ class TestResourcesEndpoint:
 class TestToolStatsEndpoint:
     """Test tool statistics endpoint"""
     
-    def test_tool_stats_returns_200(self):
+    def test_tool_stats_returns_200(self, client):
         """Test that tool stats endpoint returns 200 status"""
         response = client.get("/api/tools/stats")
         
         assert response.status_code == 200
     
-    def test_tool_stats_response_structure(self):
+    def test_tool_stats_response_structure(self, client):
         """Test tool stats response has correct structure"""
         response = client.get("/api/tools/stats")
         data = response.json()
@@ -147,7 +143,7 @@ class TestToolStatsEndpoint:
         assert "success_rates" in data
         assert "average_execution_times" in data
     
-    def test_tool_stats_with_data(self):
+    def test_tool_stats_with_data(self, client):
         """Test tool stats with recorded data"""
         # Record some tool executions
         monitoring_service.metrics_collector.record_tool_execution(
@@ -172,13 +168,13 @@ class TestToolStatsEndpoint:
 class TestPerformanceEndpoint:
     """Test performance metrics endpoint"""
     
-    def test_performance_returns_200(self):
+    def test_performance_returns_200(self, client):
         """Test that performance endpoint returns 200 status"""
         response = client.get("/api/performance")
         
         assert response.status_code == 200
     
-    def test_performance_response_structure(self):
+    def test_performance_response_structure(self, client):
         """Test performance response has correct structure"""
         response = client.get("/api/performance")
         data = response.json()
@@ -188,7 +184,7 @@ class TestPerformanceEndpoint:
         assert "total_inferences" in data
         assert "total_requests" in data
     
-    def test_performance_with_data(self):
+    def test_performance_with_data(self, client):
         """Test performance metrics with recorded data"""
         # Record some metrics
         monitoring_service.metrics_collector.record_inference_time(2.5)

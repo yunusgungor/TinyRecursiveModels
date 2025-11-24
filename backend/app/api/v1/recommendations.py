@@ -2,19 +2,22 @@
 
 import time
 import logging
-from typing import List
-from fastapi import APIRouter, HTTPException, status
+from typing import List, Optional
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.models.schemas import (
     RecommendationRequest,
     RecommendationResponse,
+    EnhancedRecommendationResponse,
     GiftItem,
-    GiftRecommendation
+    GiftRecommendation,
+    EnhancedGiftRecommendation
 )
 from app.services.model_inference import get_model_service
 from app.services.cache_service import get_cache_service
 from app.services.trendyol_api import get_trendyol_service
 from app.services.tool_orchestration import ToolOrchestrationService
+from app.core.config import settings
 from app.core.exceptions import (
     ModelInferenceError,
     TrendyolAPIError,
@@ -27,8 +30,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/recommendations", response_model=RecommendationResponse)
-async def get_recommendations(request: RecommendationRequest) -> RecommendationResponse:
+@router.post("/recommendations", response_model=EnhancedRecommendationResponse)
+async def get_recommendations(
+    request: RecommendationRequest,
+    include_reasoning: Optional[bool] = Query(
+        default=None,
+        description="Include reasoning trace in response. If not specified, defaults to configured default level."
+    ),
+    reasoning_level: Optional[str] = Query(
+        default=None,
+        description="Level of reasoning detail: 'basic', 'detailed', or 'full'",
+        pattern="^(basic|detailed|full)$"
+    )
+) -> EnhancedRecommendationResponse:
     """
     Get gift recommendations based on user profile
     
@@ -38,19 +52,55 @@ async def get_recommendations(request: RecommendationRequest) -> RecommendationR
     3. Fetches available gifts from Trendyol
     4. Runs model inference if needed
     5. Executes relevant tools
-    6. Returns ranked recommendations
+    6. Returns ranked recommendations with optional reasoning
     
     Args:
         request: Recommendation request with user profile
+        include_reasoning: Whether to include reasoning trace (default: basic reasoning)
+        reasoning_level: Level of reasoning detail ('basic', 'detailed', 'full')
         
     Returns:
-        RecommendationResponse with recommendations and metadata
+        EnhancedRecommendationResponse with recommendations and optional reasoning
         
     Raises:
-        HTTPException: If recommendation generation fails
+        HTTPException: If recommendation generation fails or invalid parameters
     """
     start_time = time.time()
     cache_hit = False
+    
+    # Use default reasoning level from settings if not specified
+    if reasoning_level is None:
+        reasoning_level = settings.REASONING_DEFAULT_LEVEL
+    
+    # Validate reasoning_level parameter
+    valid_levels = ["basic", "detailed", "full"]
+    if reasoning_level not in valid_levels:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid reasoning_level. Must be one of: {', '.join(valid_levels)}"
+        )
+    
+    # Determine reasoning behavior based on feature flag
+    # If include_reasoning is None (not specified), use configured default level
+    # If include_reasoning is False, no reasoning
+    # If include_reasoning is True, use specified reasoning_level
+    # If REASONING_ENABLED is False, disable reasoning regardless of parameters
+    if not settings.REASONING_ENABLED:
+        # Feature flag disabled - no reasoning
+        actual_include_reasoning = False
+        actual_reasoning_level = "basic"  # Won't be used
+    elif include_reasoning is None:
+        # Default behavior: use specified reasoning_level (defaults to configured level)
+        actual_include_reasoning = True
+        actual_reasoning_level = reasoning_level
+    elif include_reasoning is False:
+        # Explicitly disabled
+        actual_include_reasoning = False
+        actual_reasoning_level = "basic"  # Won't be used
+    else:
+        # Explicitly enabled with specified level
+        actual_include_reasoning = True
+        actual_reasoning_level = reasoning_level
     
     logger.info(
         f"Recommendation request received: age={request.user_profile.age}, "
@@ -73,9 +123,27 @@ async def get_recommendations(request: RecommendationRequest) -> RecommendationR
                         f"cached recommendations in {inference_time:.2f}s"
                     )
                     
-                    return RecommendationResponse(
-                        recommendations=cached_recommendations[:request.max_recommendations],
+                    # Convert to EnhancedGiftRecommendation if needed
+                    enhanced_recommendations = []
+                    for rec in cached_recommendations[:request.max_recommendations]:
+                        if isinstance(rec, EnhancedGiftRecommendation):
+                            enhanced_recommendations.append(rec)
+                        else:
+                            # Convert GiftRecommendation to EnhancedGiftRecommendation
+                            enhanced_rec = EnhancedGiftRecommendation(
+                                gift=rec.gift,
+                                confidence_score=rec.confidence_score,
+                                reasoning=rec.reasoning,
+                                tool_insights=rec.tool_insights,
+                                rank=rec.rank,
+                                reasoning_trace=None  # No reasoning trace for cached results
+                            )
+                            enhanced_recommendations.append(enhanced_rec)
+                    
+                    return EnhancedRecommendationResponse(
+                        recommendations=enhanced_recommendations,
                         tool_results={},
+                        reasoning_trace=None,  # No reasoning trace for cached results
                         inference_time=inference_time,
                         cache_hit=True
                     )
@@ -122,9 +190,10 @@ async def get_recommendations(request: RecommendationRequest) -> RecommendationR
             
             if not available_gifts:
                 logger.warning("No gifts found from Trendyol")
-                return RecommendationResponse(
+                return EnhancedRecommendationResponse(
                     recommendations=[],
                     tool_results={"error": "Uygun ürün bulunamadı"},
+                    reasoning_trace=None,
                     inference_time=time.time() - start_time,
                     cache_hit=False
                 )
@@ -136,17 +205,25 @@ async def get_recommendations(request: RecommendationRequest) -> RecommendationR
                 detail="Ürün verileri şu anda alınamıyor. Lütfen daha sonra tekrar deneyin."
             )
         
-        # Step 4: Run model inference
+        # Step 4: Run model inference with reasoning parameters
         try:
-            logger.info("Running model inference...")
-            
-            recommendations, tool_results = await model_service.generate_recommendations(
-                user_profile=request.user_profile,
-                available_gifts=available_gifts,
-                max_recommendations=request.max_recommendations
+            logger.info(
+                f"Running model inference with include_reasoning={actual_include_reasoning}, "
+                f"reasoning_level={actual_reasoning_level}"
             )
             
-            logger.info(f"Model generated {len(recommendations)} recommendations")
+            recommendations, tool_results, reasoning_trace = await model_service.generate_recommendations(
+                user_profile=request.user_profile,
+                available_gifts=available_gifts,
+                max_recommendations=request.max_recommendations,
+                include_reasoning=actual_include_reasoning,
+                reasoning_level=actual_reasoning_level
+            )
+            
+            logger.info(
+                f"Model generated {len(recommendations)} recommendations "
+                f"with reasoning_trace={'present' if reasoning_trace else 'absent'}"
+            )
         
         except ModelInferenceError as e:
             logger.error(f"Model inference error: {e}")
@@ -171,17 +248,35 @@ async def get_recommendations(request: RecommendationRequest) -> RecommendationR
             except CacheError as e:
                 logger.warning(f"Failed to cache recommendations: {e}")
         
+        # Convert recommendations to EnhancedGiftRecommendation
+        enhanced_recommendations = []
+        for rec in recommendations:
+            if isinstance(rec, EnhancedGiftRecommendation):
+                enhanced_recommendations.append(rec)
+            else:
+                # Convert GiftRecommendation to EnhancedGiftRecommendation
+                enhanced_rec = EnhancedGiftRecommendation(
+                    gift=rec.gift,
+                    confidence_score=rec.confidence_score,
+                    reasoning=rec.reasoning,
+                    tool_insights=rec.tool_insights,
+                    rank=rec.rank,
+                    reasoning_trace=None  # Individual reasoning traces not included
+                )
+                enhanced_recommendations.append(enhanced_rec)
+        
         # Calculate total inference time
         inference_time = time.time() - start_time
         
         logger.info(
-            f"Recommendation request completed: {len(recommendations)} recommendations "
-            f"in {inference_time:.2f}s"
+            f"Recommendation request completed: {len(enhanced_recommendations)} recommendations "
+            f"in {inference_time:.2f}s with reasoning_level={actual_reasoning_level}"
         )
         
-        return RecommendationResponse(
-            recommendations=recommendations,
+        return EnhancedRecommendationResponse(
+            recommendations=enhanced_recommendations,
             tool_results=tool_results,
+            reasoning_trace=reasoning_trace,
             inference_time=inference_time,
             cache_hit=cache_hit
         )

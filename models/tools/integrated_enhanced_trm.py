@@ -851,6 +851,828 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         
         return carry, rl_output, selected_tools[0] if selected_tools else []
     
+    def forward_with_reasoning_trace(
+        self,
+        carry,
+        env_state: EnvironmentState,
+        available_gifts: List[GiftItem],
+        execute_tools: bool = True,
+        capture_reasoning: bool = True,
+        max_thinking_steps: Optional[int] = None
+    ) -> Tuple[Any, Dict[str, torch.Tensor], List[str], Dict[str, Any]]:
+        """
+        Forward pass with reasoning trace capture
+        
+        This is a wrapper method that calls the existing forward_with_enhancements()
+        and extracts reasoning components when capture_reasoning=True.
+        
+        Args:
+            carry: Carry state from previous step
+            env_state: Current environment state
+            available_gifts: List of available gift items
+            execute_tools: If True, automatically execute selected tools (default: True)
+            capture_reasoning: If True, capture and return reasoning trace (default: True)
+            max_thinking_steps: Maximum number of thinking steps to generate (default: no limit)
+            
+        Returns:
+            Tuple of (carry, rl_output, selected_tools, reasoning_trace)
+            - carry: Updated carry state
+            - rl_output: Dictionary containing model outputs
+            - selected_tools: List of selected tool names
+            - reasoning_trace: Dictionary containing reasoning components (empty if capture_reasoning=False)
+        """
+        reasoning_trace = {}
+        
+        # Call existing forward_with_enhancements
+        carry, rl_output, selected_tools = self.forward_with_enhancements(
+            carry, env_state, available_gifts, execute_tools
+        )
+        
+        if capture_reasoning:
+            # Encode user profile for reasoning extraction
+            user_encoding = self.encode_user_profile(env_state.user_profile)
+            
+            # Extract reasoning components
+            reasoning_trace = {
+                "tool_selection": self.explain_tool_selection(
+                    rl_output["tool_scores"],
+                    user_encoding,
+                    selected_tools
+                ),
+                "category_matching": self.explain_category_matching(
+                    rl_output["category_scores"],
+                    user_encoding
+                ),
+                "attention_weights": self.extract_attention_weights(
+                    user_encoding,
+                    None,  # Will be computed internally
+                    rl_output["category_scores"]
+                ),
+                "thinking_steps": self.get_thinking_steps(
+                    env_state,
+                    rl_output,
+                    max_steps=max_thinking_steps
+                )
+            }
+        
+        return carry, rl_output, selected_tools, reasoning_trace
+    
+    def get_thinking_steps(
+        self,
+        env_state: EnvironmentState,
+        model_output: Dict[str, Any],
+        max_steps: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate step-by-step thinking process
+        
+        Args:
+            env_state: Current environment state with user profile
+            model_output: Dictionary containing model outputs from forward pass
+            max_steps: Maximum number of thinking steps to generate (default: no limit)
+            
+        Returns:
+            List of thinking steps, each containing:
+            {
+                "step": int,
+                "action": str,
+                "result": str,
+                "insight": str
+            }
+        """
+        steps = []
+        step_counter = 1
+        
+        # Step 1: User encoding
+        if max_steps is None or step_counter <= max_steps:
+            user_encoding = self.encode_user_profile(env_state.user_profile)
+            user_insight = self._summarize_user_profile(env_state.user_profile)
+            steps.append({
+                "step": step_counter,
+                "action": "Encode user profile",
+                "result": f"User encoding shape: {user_encoding.shape}",
+                "insight": user_insight
+            })
+            step_counter += 1
+        
+        # Step 2: Category matching
+        if max_steps is None or step_counter <= max_steps:
+            category_scores = model_output.get("category_scores")
+            if category_scores is not None:
+                top_categories = self._get_top_categories(category_scores, k=3)
+                steps.append({
+                    "step": step_counter,
+                    "action": "Match categories",
+                    "result": f"Top categories: {', '.join(top_categories)}",
+                    "insight": f"Identified {len(top_categories)} relevant categories based on user profile"
+                })
+                step_counter += 1
+        
+        # Step 3: Tool selection
+        if max_steps is None or step_counter <= max_steps:
+            executed_tools = model_output.get("executed_tools", [])
+            tool_scores = model_output.get("tool_scores")
+            if tool_scores is not None:
+                steps.append({
+                    "step": step_counter,
+                    "action": "Select tools",
+                    "result": f"Selected tools: {', '.join(executed_tools) if executed_tools else 'none'}",
+                    "insight": f"Chose {len(executed_tools)} tools for analysis based on user needs"
+                })
+                step_counter += 1
+        
+        # Step 4: Tool execution (only if tools were actually executed)
+        if max_steps is None or step_counter <= max_steps:
+            tool_results = model_output.get("tool_results", {})
+            if tool_results:
+                tool_summary = self._summarize_tool_results(tool_results)
+                steps.append({
+                    "step": step_counter,
+                    "action": "Execute tools",
+                    "result": f"Executed {len(tool_results)} tools successfully",
+                    "insight": tool_summary
+                })
+                step_counter += 1
+        
+        # Step 5: Gift ranking
+        if max_steps is None or step_counter <= max_steps:
+            action_probs = model_output.get("action_probs")
+            if action_probs is not None:
+                top_k = min(5, action_probs.size(-1))
+                steps.append({
+                    "step": step_counter,
+                    "action": "Rank gifts",
+                    "result": f"Ranked top {top_k} gifts",
+                    "insight": "Selected gifts based on multi-criteria scoring (category match, budget, quality)"
+                })
+                step_counter += 1
+        
+        return steps
+    
+    def _summarize_user_profile(self, user_profile: UserProfile) -> str:
+        """Generate insight summary from user profile"""
+        insights = []
+        
+        # Hobby insights
+        if user_profile.hobbies:
+            primary_hobby = user_profile.hobbies[0]
+            if len(user_profile.hobbies) > 1:
+                insights.append(f"Strong {primary_hobby} interest with {len(user_profile.hobbies)-1} other hobbies")
+            else:
+                insights.append(f"Strong {primary_hobby} interest detected")
+        
+        # Budget insights
+        if user_profile.budget < 200:
+            insights.append("Budget-conscious shopper")
+        elif user_profile.budget > 1000:
+            insights.append("Premium budget range")
+        else:
+            insights.append("Moderate budget range")
+        
+        # Occasion insights
+        if user_profile.occasion:
+            insights.append(f"Shopping for {user_profile.occasion}")
+        
+        # Age insights
+        if user_profile.age < 25:
+            insights.append("Young adult demographic")
+        elif user_profile.age > 60:
+            insights.append("Senior demographic")
+        else:
+            insights.append("Adult demographic")
+        
+        return "; ".join(insights) if insights else "Standard user profile"
+    
+    def _get_top_categories(self, category_scores: torch.Tensor, k: int = 3) -> List[str]:
+        """Get top k categories by score"""
+        # Flatten category scores if needed
+        if category_scores.dim() > 1:
+            category_scores = category_scores.squeeze(0)
+        
+        # Get top k indices
+        top_k = min(k, len(self.gift_categories))
+        top_indices = torch.topk(category_scores, top_k).indices.tolist()
+        
+        # Map to category names
+        top_categories = [self.gift_categories[idx] for idx in top_indices if idx < len(self.gift_categories)]
+        
+        return top_categories
+    
+    def _summarize_tool_results(self, tool_results: Dict[str, Any]) -> str:
+        """Generate summary of tool execution results"""
+        summaries = []
+        
+        for tool_name, result in tool_results.items():
+            if tool_name == "price_comparison":
+                if isinstance(result, dict):
+                    count = result.get("count", 0)
+                    summaries.append(f"Found {count} items in budget range")
+                else:
+                    summaries.append("Price comparison completed")
+            
+            elif tool_name == "review_analysis":
+                if isinstance(result, dict):
+                    avg_rating = result.get("average_rating", 0)
+                    summaries.append(f"Average rating: {avg_rating:.1f}/5.0")
+                else:
+                    summaries.append("Review analysis completed")
+            
+            elif tool_name == "inventory_check":
+                if isinstance(result, dict):
+                    available = result.get("available", [])
+                    summaries.append(f"{len(available)} items in stock")
+                else:
+                    summaries.append("Inventory check completed")
+            
+            elif tool_name == "trend_analyzer":
+                if isinstance(result, dict):
+                    trending = result.get("trending", [])
+                    summaries.append(f"{len(trending)} trending items found")
+                else:
+                    summaries.append("Trend analysis completed")
+            
+            else:
+                summaries.append(f"{tool_name} executed")
+        
+        return "; ".join(summaries) if summaries else "No tool results to summarize"
+    
+    def extract_attention_weights(
+        self,
+        user_encoding: torch.Tensor,
+        gift_encodings: Optional[torch.Tensor],
+        category_scores: torch.Tensor
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Extract attention weights from model components
+        
+        Args:
+            user_encoding: Encoded user profile tensor
+            gift_encodings: Encoded gift features (optional)
+            category_scores: Category matching scores
+            
+        Returns:
+            Dictionary with user_features and gift_features attention weights
+            {
+                "user_features": {
+                    "hobbies": 0.45,
+                    "budget": 0.30,
+                    "age": 0.15,
+                    "occasion": 0.10
+                },
+                "gift_features": {
+                    "category": 0.40,
+                    "price": 0.35,
+                    "rating": 0.25
+                }
+            }
+        """
+        device = user_encoding.device
+        
+        # Extract user feature dimensions from the encoding
+        # User encoding structure: [hobbies, preferences, occasion, age, budget]
+        config = self.enhanced_config
+        
+        # Calculate feature importance based on encoding magnitudes
+        user_encoding_flat = user_encoding.squeeze(0) if user_encoding.dim() > 1 else user_encoding
+        
+        # Split user encoding into components
+        hobby_dim = config.hobby_embedding_dim
+        pref_dim = config.preference_embedding_dim
+        occasion_dim = config.occasion_embedding_dim
+        age_dim = config.age_encoding_dim
+        budget_dim = config.age_encoding_dim  # Same as age encoding dim
+        
+        # Extract feature segments
+        hobby_features = user_encoding_flat[:hobby_dim]
+        pref_features = user_encoding_flat[hobby_dim:hobby_dim + pref_dim]
+        occasion_features = user_encoding_flat[hobby_dim + pref_dim:hobby_dim + pref_dim + occasion_dim]
+        age_features = user_encoding_flat[hobby_dim + pref_dim + occasion_dim:hobby_dim + pref_dim + occasion_dim + age_dim]
+        budget_features = user_encoding_flat[hobby_dim + pref_dim + occasion_dim + age_dim:hobby_dim + pref_dim + occasion_dim + age_dim + budget_dim]
+        
+        # Calculate attention weights based on L2 norm of each feature group
+        hobby_weight = torch.norm(hobby_features, p=2).item()
+        pref_weight = torch.norm(pref_features, p=2).item()
+        occasion_weight = torch.norm(occasion_features, p=2).item()
+        age_weight = torch.norm(age_features, p=2).item()
+        budget_weight = torch.norm(budget_features, p=2).item()
+        
+        # Normalize user feature weights to sum to 1.0
+        total_user_weight = hobby_weight + pref_weight + occasion_weight + age_weight + budget_weight
+        
+        if total_user_weight > 0:
+            user_weights = {
+                "hobbies": hobby_weight / total_user_weight,
+                "preferences": pref_weight / total_user_weight,
+                "occasion": occasion_weight / total_user_weight,
+                "age": age_weight / total_user_weight,
+                "budget": budget_weight / total_user_weight
+            }
+        else:
+            # Fallback to uniform distribution if all weights are zero
+            user_weights = {
+                "hobbies": 0.2,
+                "preferences": 0.2,
+                "occasion": 0.2,
+                "age": 0.2,
+                "budget": 0.2
+            }
+        
+        # Extract gift feature weights from category scores and gift encodings
+        # Use category scores as proxy for category importance
+        category_scores_flat = category_scores.squeeze(0) if category_scores.dim() > 1 else category_scores
+        category_weight = torch.mean(torch.abs(category_scores_flat)).item()
+        
+        # For price and rating, use heuristics based on model architecture
+        # These would ideally come from actual attention mechanisms in the model
+        # For now, we'll use reasonable defaults based on the reward components
+        price_weight = 0.35  # Budget compatibility is important
+        rating_weight = 0.25  # Quality score is important
+        
+        # Normalize gift feature weights
+        total_gift_weight = category_weight + price_weight + rating_weight
+        
+        if total_gift_weight > 0:
+            gift_weights = {
+                "category": category_weight / total_gift_weight,
+                "price": price_weight / total_gift_weight,
+                "rating": rating_weight / total_gift_weight
+            }
+        else:
+            # Fallback to reasonable defaults
+            gift_weights = {
+                "category": 0.40,
+                "price": 0.35,
+                "rating": 0.25
+            }
+        
+        return {
+            "user_features": user_weights,
+            "gift_features": gift_weights
+        }
+    
+    def explain_tool_selection(
+        self,
+        tool_scores: torch.Tensor,
+        user_encoding: torch.Tensor,
+        selected_tools: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Explain why specific tools were selected
+        
+        Args:
+            tool_scores: Tool selection scores from model
+            user_encoding: Encoded user profile
+            selected_tools: List of selected tool names
+            
+        Returns:
+            Dictionary with tool selection reasoning:
+            {
+                "price_comparison": {
+                    "selected": True,
+                    "score": 0.85,
+                    "reason": "User has strict budget constraint (500 TL)",
+                    "confidence": 0.85,
+                    "priority": 1,
+                    "factors": {
+                        "budget_constraint": 0.9,
+                        "price_sensitivity": 0.8
+                    }
+                },
+                ...
+            }
+        """
+        device = tool_scores.device
+        tool_names = list(self.tool_registry.list_tools())
+        
+        # Flatten tool scores if needed
+        if tool_scores.dim() > 1:
+            tool_scores = tool_scores.squeeze(0)
+        
+        # Extract user profile features for reasoning
+        config = self.enhanced_config
+        user_encoding_flat = user_encoding.squeeze(0) if user_encoding.dim() > 1 else user_encoding
+        
+        # Split user encoding into components for factor analysis
+        hobby_dim = config.hobby_embedding_dim
+        pref_dim = config.preference_embedding_dim
+        occasion_dim = config.occasion_embedding_dim
+        age_dim = config.age_encoding_dim
+        budget_dim = config.age_encoding_dim
+        
+        # Extract feature segments
+        hobby_features = user_encoding_flat[:hobby_dim]
+        pref_features = user_encoding_flat[hobby_dim:hobby_dim + pref_dim]
+        occasion_features = user_encoding_flat[hobby_dim + pref_dim:hobby_dim + pref_dim + occasion_dim]
+        age_features = user_encoding_flat[hobby_dim + pref_dim + occasion_dim:hobby_dim + pref_dim + occasion_dim + age_dim]
+        budget_features = user_encoding_flat[hobby_dim + pref_dim + occasion_dim + age_dim:hobby_dim + pref_dim + occasion_dim + age_dim + budget_dim]
+        
+        # Calculate feature importance scores
+        hobby_importance = torch.norm(hobby_features, p=2).item()
+        pref_importance = torch.norm(pref_features, p=2).item()
+        occasion_importance = torch.norm(occasion_features, p=2).item()
+        age_importance = torch.norm(age_features, p=2).item()
+        budget_importance = torch.norm(budget_features, p=2).item()
+        
+        # Normalize importance scores
+        total_importance = hobby_importance + pref_importance + occasion_importance + age_importance + budget_importance
+        if total_importance > 0:
+            hobby_importance /= total_importance
+            pref_importance /= total_importance
+            occasion_importance /= total_importance
+            age_importance /= total_importance
+            budget_importance /= total_importance
+        
+        # Build reasoning for each tool
+        tool_reasoning = {}
+        
+        # Sort tools by score to determine priority
+        sorted_indices = torch.argsort(tool_scores, descending=True)
+        priority_map = {tool_names[idx.item()]: i + 1 for i, idx in enumerate(sorted_indices) if idx.item() < len(tool_names)}
+        
+        for tool_idx, tool_name in enumerate(tool_names):
+            if tool_idx >= len(tool_scores):
+                continue
+                
+            score = tool_scores[tool_idx].item()
+            is_selected = tool_name in selected_tools
+            confidence = score
+            priority = priority_map.get(tool_name, len(tool_names))
+            
+            # Generate tool-specific reasoning and factors
+            reason, factors = self._generate_tool_reason(
+                tool_name, score, is_selected,
+                hobby_importance, pref_importance, occasion_importance,
+                age_importance, budget_importance
+            )
+            
+            tool_reasoning[tool_name] = {
+                "selected": is_selected,
+                "score": float(score),
+                "reason": reason,
+                "confidence": float(confidence),
+                "priority": int(priority),
+                "factors": factors
+            }
+        
+        return tool_reasoning
+    
+    def explain_category_matching(
+        self,
+        category_scores: torch.Tensor,
+        user_encoding: torch.Tensor
+    ) -> Dict[str, Any]:
+        """
+        Explain category matching process
+        
+        Args:
+            category_scores: Category matching scores from model
+            user_encoding: Encoded user profile
+            
+        Returns:
+            Dictionary with category matching reasoning:
+            {
+                "Kitchen": {
+                    "score": 0.85,
+                    "reasons": [
+                        "User hobby: cooking (0.9 match)",
+                        "Occasion: birthday (0.7 match)",
+                        "Age appropriate: 35 years (0.8 match)"
+                    ],
+                    "feature_contributions": {
+                        "hobby_match": 0.45,
+                        "occasion_fit": 0.30,
+                        "age_appropriateness": 0.25
+                    }
+                },
+                ...
+            }
+        """
+        device = category_scores.device
+        
+        # Flatten category scores if needed
+        if category_scores.dim() > 1:
+            category_scores = category_scores.squeeze(0)
+        
+        # Extract user profile features for reasoning
+        config = self.enhanced_config
+        user_encoding_flat = user_encoding.squeeze(0) if user_encoding.dim() > 1 else user_encoding
+        
+        # Split user encoding into components for factor analysis
+        hobby_dim = config.hobby_embedding_dim
+        pref_dim = config.preference_embedding_dim
+        occasion_dim = config.occasion_embedding_dim
+        age_dim = config.age_encoding_dim
+        budget_dim = config.age_encoding_dim
+        
+        # Extract feature segments
+        hobby_features = user_encoding_flat[:hobby_dim]
+        pref_features = user_encoding_flat[hobby_dim:hobby_dim + pref_dim]
+        occasion_features = user_encoding_flat[hobby_dim + pref_dim:hobby_dim + pref_dim + occasion_dim]
+        age_features = user_encoding_flat[hobby_dim + pref_dim + occasion_dim:hobby_dim + pref_dim + occasion_dim + age_dim]
+        budget_features = user_encoding_flat[hobby_dim + pref_dim + occasion_dim + age_dim:hobby_dim + pref_dim + occasion_dim + age_dim + budget_dim]
+        
+        # Calculate feature importance scores
+        hobby_importance = torch.norm(hobby_features, p=2).item()
+        pref_importance = torch.norm(pref_features, p=2).item()
+        occasion_importance = torch.norm(occasion_features, p=2).item()
+        age_importance = torch.norm(age_features, p=2).item()
+        budget_importance = torch.norm(budget_features, p=2).item()
+        
+        # Normalize importance scores
+        total_importance = hobby_importance + pref_importance + occasion_importance + age_importance + budget_importance
+        if total_importance > 0:
+            hobby_importance /= total_importance
+            pref_importance /= total_importance
+            occasion_importance /= total_importance
+            age_importance /= total_importance
+            budget_importance /= total_importance
+        
+        # Get top categories (at least 3)
+        num_categories = min(max(3, len(self.gift_categories)), len(category_scores))
+        top_k_scores, top_k_indices = torch.topk(category_scores, num_categories)
+        
+        # Build reasoning for each category
+        category_reasoning = {}
+        
+        for idx, score_idx in enumerate(top_k_indices):
+            if score_idx.item() >= len(self.gift_categories):
+                continue
+                
+            category_name = self.gift_categories[score_idx.item()]
+            score = top_k_scores[idx].item()
+            
+            # Generate category-specific reasoning and factors
+            reasons, factors = self._generate_category_reason(
+                category_name, score,
+                hobby_importance, pref_importance, occasion_importance,
+                age_importance, budget_importance
+            )
+            
+            category_reasoning[category_name] = {
+                "score": float(score),
+                "reasons": reasons,
+                "feature_contributions": factors
+            }
+        
+        return category_reasoning
+    
+    def _generate_category_reason(
+        self,
+        category_name: str,
+        score: float,
+        hobby_importance: float,
+        pref_importance: float,
+        occasion_importance: float,
+        age_importance: float,
+        budget_importance: float
+    ) -> Tuple[List[str], Dict[str, float]]:
+        """
+        Generate category-specific reasoning and contributing factors
+        
+        Returns:
+            Tuple of (reasons_list, factors_dict)
+        """
+        reasons = []
+        factors = {}
+        
+        # Category-hobby mapping for reasoning
+        category_hobby_map = {
+            "kitchen": ["cooking", "baking"],
+            "technology": ["technology", "gaming", "gadgets"],
+            "books": ["reading", "learning"],
+            "sports": ["sports", "fitness", "outdoor"],
+            "gardening": ["gardening", "outdoor", "nature"],
+            "art": ["art", "creative", "crafts"],
+            "music": ["music", "entertainment"],
+            "beauty": ["beauty", "wellness", "self-care"],
+            "home": ["home", "decoration", "practical"],
+            "fashion": ["fashion", "style"],
+            "gaming": ["gaming", "technology", "entertainment"],
+            "fitness": ["fitness", "sports", "health"],
+            "wellness": ["wellness", "health", "self-care"]
+        }
+        
+        # Category-occasion mapping
+        category_occasion_map = {
+            "kitchen": ["birthday", "wedding", "housewarming"],
+            "technology": ["birthday", "graduation", "christmas"],
+            "books": ["birthday", "graduation", "christmas"],
+            "sports": ["birthday", "christmas"],
+            "gardening": ["birthday", "mother's day", "father's day"],
+            "art": ["birthday", "christmas"],
+            "music": ["birthday", "christmas"],
+            "beauty": ["birthday", "valentine's day", "mother's day"],
+            "home": ["wedding", "housewarming", "christmas"],
+            "fashion": ["birthday", "valentine's day"],
+            "gaming": ["birthday", "christmas"],
+            "fitness": ["birthday", "new year"],
+            "wellness": ["birthday", "mother's day"]
+        }
+        
+        # Determine if this is a high score (>0.7) or low score (<0.3) category
+        is_high_score = score > 0.7
+        is_low_score = score < 0.3
+        
+        # Calculate feature contributions based on category type
+        # Hobby match contribution
+        related_hobbies = category_hobby_map.get(category_name.lower(), [])
+        hobby_match = hobby_importance if related_hobbies else hobby_importance * 0.3
+        factors["hobby_match"] = float(hobby_match)
+        
+        # Occasion fit contribution
+        related_occasions = category_occasion_map.get(category_name.lower(), [])
+        occasion_fit = occasion_importance if related_occasions else occasion_importance * 0.3
+        factors["occasion_fit"] = float(occasion_fit)
+        
+        # Age appropriateness contribution (all categories are generally age-appropriate)
+        age_appropriateness = age_importance * 0.8
+        factors["age_appropriateness"] = float(age_appropriateness)
+        
+        # Preference alignment contribution
+        preference_alignment = pref_importance * 0.7
+        factors["preference_alignment"] = float(preference_alignment)
+        
+        # Budget compatibility contribution
+        budget_compatibility = budget_importance * 0.6
+        factors["budget_compatibility"] = float(budget_compatibility)
+        
+        # Generate reasons based on score level
+        if is_high_score:
+            # High score explanations (>0.7)
+            if hobby_match > 0.3:
+                if related_hobbies:
+                    reasons.append(f"Strong hobby match: {', '.join(related_hobbies[:2])} ({hobby_match:.2f} relevance)")
+                else:
+                    reasons.append(f"Hobby alignment detected ({hobby_match:.2f} relevance)")
+            
+            if occasion_fit > 0.25:
+                if related_occasions:
+                    reasons.append(f"Suitable for occasions: {', '.join(related_occasions[:2])} ({occasion_fit:.2f} fit)")
+                else:
+                    reasons.append(f"Occasion compatibility ({occasion_fit:.2f} fit)")
+            
+            if age_appropriateness > 0.2:
+                reasons.append(f"Age-appropriate category ({age_appropriateness:.2f} suitability)")
+            
+            if preference_alignment > 0.2:
+                reasons.append(f"Matches user preferences ({preference_alignment:.2f} alignment)")
+            
+            # Ensure at least one reason for high scores
+            if not reasons:
+                reasons.append(f"Strong overall match (score: {score:.2f})")
+        
+        elif is_low_score:
+            # Low score explanations (<0.3)
+            if hobby_match < 0.15:
+                reasons.append(f"Limited hobby relevance ({hobby_match:.2f} match)")
+            
+            if occasion_fit < 0.15:
+                reasons.append(f"Weak occasion fit ({occasion_fit:.2f} compatibility)")
+            
+            if age_appropriateness < 0.15:
+                reasons.append(f"Age mismatch concerns ({age_appropriateness:.2f} suitability)")
+            
+            if preference_alignment < 0.15:
+                reasons.append(f"Preference misalignment ({preference_alignment:.2f} match)")
+            
+            # Ensure at least one reason for low scores
+            if not reasons:
+                reasons.append(f"Low overall match (score: {score:.2f})")
+        
+        else:
+            # Medium score explanations (0.3-0.7)
+            if hobby_match > 0.2:
+                reasons.append(f"Moderate hobby relevance ({hobby_match:.2f} match)")
+            
+            if occasion_fit > 0.2:
+                reasons.append(f"Reasonable occasion fit ({occasion_fit:.2f} compatibility)")
+            
+            if age_appropriateness > 0.15:
+                reasons.append(f"Age-appropriate ({age_appropriateness:.2f} suitability)")
+            
+            # Ensure at least one reason
+            if not reasons:
+                reasons.append(f"Moderate match (score: {score:.2f})")
+        
+        return reasons, factors
+    
+    def _generate_tool_reason(
+        self,
+        tool_name: str,
+        score: float,
+        is_selected: bool,
+        hobby_importance: float,
+        pref_importance: float,
+        occasion_importance: float,
+        age_importance: float,
+        budget_importance: float
+    ) -> Tuple[str, Dict[str, float]]:
+        """
+        Generate tool-specific reasoning and contributing factors
+        
+        Returns:
+            Tuple of (reason_string, factors_dict)
+        """
+        factors = {}
+        
+        if tool_name == "price_comparison":
+            # Price comparison is influenced by budget
+            factors["budget_constraint"] = budget_importance
+            factors["price_sensitivity"] = min(1.0, budget_importance * 1.2)
+            
+            if is_selected:
+                if budget_importance > 0.3:
+                    reason = f"User has budget constraint (importance: {budget_importance:.2f})"
+                else:
+                    reason = "Price comparison selected for value optimization"
+                
+                # Add low confidence explanation if confidence is low
+                if score < 0.5:
+                    reason += f" (Note: Low confidence score {score:.2f} - limited budget signal in profile)"
+            else:
+                if score < 0.15:
+                    reason = f"Low confidence in price comparison relevance (score: {score:.2f})"
+                else:
+                    reason = "Not selected due to lower priority compared to other tools"
+        
+        elif tool_name == "review_analysis":
+            # Review analysis is influenced by preferences and quality concerns
+            factors["quality_preference"] = pref_importance
+            factors["decision_confidence"] = min(1.0, pref_importance * 1.3)
+            
+            if is_selected:
+                if pref_importance > 0.25:
+                    reason = f"User values quality and reviews (importance: {pref_importance:.2f})"
+                else:
+                    reason = "Review analysis selected for quality assurance"
+                
+                # Add low confidence explanation if confidence is low
+                if score < 0.5:
+                    reason += f" (Note: Low confidence score {score:.2f} - weak quality preference signal)"
+            else:
+                if score < 0.15:
+                    reason = f"Low confidence in review analysis need (score: {score:.2f})"
+                else:
+                    reason = "Not selected due to lower priority"
+        
+        elif tool_name == "inventory_check":
+            # Inventory check is influenced by occasion urgency
+            factors["occasion_urgency"] = occasion_importance
+            factors["availability_concern"] = min(1.0, occasion_importance * 1.1)
+            
+            if is_selected:
+                if occasion_importance > 0.2:
+                    reason = f"Occasion-driven need for availability check (importance: {occasion_importance:.2f})"
+                else:
+                    reason = "Inventory check selected to ensure availability"
+                
+                # Add low confidence explanation if confidence is low
+                if score < 0.5:
+                    reason += f" (Note: Low confidence score {score:.2f} - weak occasion urgency signal)"
+            else:
+                if score < 0.15:
+                    reason = f"Low confidence in inventory check need (score: {score:.2f})"
+                else:
+                    reason = "Not selected due to lower priority"
+        
+        elif tool_name == "trend_analyzer":
+            # Trend analysis is influenced by hobbies and age
+            factors["hobby_relevance"] = hobby_importance
+            factors["trend_awareness"] = min(1.0, (hobby_importance + age_importance) / 2)
+            
+            if is_selected:
+                if hobby_importance > 0.3:
+                    reason = f"User hobbies suggest trend awareness (importance: {hobby_importance:.2f})"
+                else:
+                    reason = "Trend analysis selected for current preferences"
+                
+                # Add low confidence explanation if confidence is low
+                if score < 0.5:
+                    reason += f" (Note: Low confidence score {score:.2f} - limited hobby/trend signal)"
+            else:
+                if score < 0.15:
+                    reason = f"Low confidence in trend analysis relevance (score: {score:.2f})"
+                else:
+                    reason = "Not selected due to lower priority"
+        
+        else:
+            # Generic reasoning for unknown tools
+            factors["general_relevance"] = score
+            
+            if is_selected:
+                reason = f"Tool selected based on model confidence (score: {score:.2f})"
+                
+                # Add low confidence explanation if confidence is low
+                if score < 0.5:
+                    reason += f" (Note: Low confidence score {score:.2f} - weak relevance signal)"
+            else:
+                if score < 0.15:
+                    reason = f"Low confidence score: {score:.2f}"
+                else:
+                    reason = "Not selected due to lower priority"
+        
+        return reason, factors
+    
     def encode_tool_result(self, tool_result: Any) -> torch.Tensor:
         """
         Encode tool result into tensor representation

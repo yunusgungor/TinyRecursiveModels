@@ -395,3 +395,450 @@ class TestUserProfileEncoding:
         
         assert encoding is not None
         assert isinstance(encoding, torch.Tensor)
+
+
+class TestReasoningServiceIntegration:
+    """
+    Test reasoning service integration in ModelInferenceService
+    Requirements: 3.1, 10.1, 10.5
+    """
+    
+    @pytest.mark.asyncio
+    async def test_generate_recommendations_with_reasoning_enabled(self):
+        """Test that reasoning is generated when include_reasoning=True"""
+        service = ModelInferenceService()
+        service.model_loaded = True
+        service.model = MagicMock()
+        
+        # Create mock gift
+        mock_gift = MagicMock()
+        mock_gift.id = "123"
+        mock_gift.name = "Test Gift"
+        mock_gift.category = "Kitchen"
+        mock_gift.price = 100.0
+        mock_gift.rating = 4.5
+        mock_gift.tags = ["cooking"]
+        mock_gift.description = "Test description"
+        mock_gift.age_suitability = (18, 100)
+        mock_gift.occasion_fit = ["birthday"]
+        
+        # Mock recommendation
+        mock_recommendation = MagicMock()
+        mock_recommendation.gift = GiftItem(
+            id="123",
+            name="Test Gift",
+            category="Kitchen",
+            price=100.0,
+            rating=4.5,
+            image_url="https://example.com/image.jpg",
+            trendyol_url="https://example.com/product/123",
+            tags=["cooking"],
+            description="Test description",
+            age_suitability=(18, 100),
+            occasion_fit=["birthday"]
+        )
+        mock_recommendation.confidence_score = 0.85
+        mock_recommendation.reasoning = []
+        
+        # Mock _run_inference to return recommendations with reasoning
+        async def mock_run_inference(*args, **kwargs):
+            return [mock_recommendation], {}, {"tool_selection": [], "category_matching": []}
+        
+        with patch.object(service, '_run_inference', side_effect=mock_run_inference):
+            profile = UserProfile(
+                age=30,
+                hobbies=["cooking"],
+                relationship="friend",
+                budget=200.0,
+                occasion="birthday",
+                personality_traits=["practical"]
+            )
+            
+            recommendations, tool_results, reasoning_trace = await service.generate_recommendations(
+                profile,
+                [],
+                include_reasoning=True,
+                reasoning_level="detailed"
+            )
+            
+            assert recommendations is not None
+            assert reasoning_trace is not None
+    
+    @pytest.mark.asyncio
+    async def test_generate_recommendations_with_reasoning_disabled(self):
+        """Test that reasoning is not generated when include_reasoning=False"""
+        service = ModelInferenceService()
+        service.model_loaded = True
+        service.model = MagicMock()
+        
+        # Mock _run_inference to return recommendations without reasoning
+        async def mock_run_inference(*args, **kwargs):
+            return [], {}, None
+        
+        with patch.object(service, '_run_inference', side_effect=mock_run_inference):
+            profile = UserProfile(
+                age=30,
+                hobbies=["cooking"],
+                relationship="friend",
+                budget=200.0,
+                occasion="birthday",
+                personality_traits=["practical"]
+            )
+            
+            recommendations, tool_results, reasoning_trace = await service.generate_recommendations(
+                profile,
+                [],
+                include_reasoning=False
+            )
+            
+            assert reasoning_trace is None
+    
+    @pytest.mark.asyncio
+    async def test_reasoning_level_basic(self):
+        """Test reasoning generation with basic level"""
+        service = ModelInferenceService()
+        service.model_loaded = True
+        service.model = MagicMock()
+        
+        # Mock recommendation
+        mock_recommendation = MagicMock()
+        mock_recommendation.gift = GiftItem(
+            id="123",
+            name="Test Gift",
+            category="Kitchen",
+            price=100.0,
+            rating=4.5,
+            image_url="https://example.com/image.jpg",
+            trendyol_url="https://example.com/product/123",
+            tags=["cooking"],
+            description="Test description",
+            age_suitability=(18, 100),
+            occasion_fit=["birthday"]
+        )
+        mock_recommendation.confidence_score = 0.85
+        mock_recommendation.reasoning = []
+        
+        # Mock _run_inference
+        async def mock_run_inference(*args, **kwargs):
+            reasoning_level = kwargs.get('reasoning_level', 'detailed')
+            reasoning_trace = {
+                "tool_selection": [],
+                "category_matching": [],
+                "confidence_explanation": None
+            }
+            if reasoning_level == "basic":
+                # Basic level should have minimal reasoning
+                pass
+            return [mock_recommendation], {}, reasoning_trace
+        
+        with patch.object(service, '_run_inference', side_effect=mock_run_inference):
+            profile = UserProfile(
+                age=30,
+                hobbies=["cooking"],
+                relationship="friend",
+                budget=200.0,
+                occasion="birthday",
+                personality_traits=["practical"]
+            )
+            
+            recommendations, tool_results, reasoning_trace = await service.generate_recommendations(
+                profile,
+                [],
+                include_reasoning=True,
+                reasoning_level="basic"
+            )
+            
+            assert recommendations is not None
+            assert reasoning_trace is not None
+    
+    @pytest.mark.asyncio
+    async def test_reasoning_level_detailed(self):
+        """Test reasoning generation with detailed level"""
+        service = ModelInferenceService()
+        service.model_loaded = True
+        service.model = MagicMock()
+        
+        # Mock recommendation
+        mock_recommendation = MagicMock()
+        mock_recommendation.gift = GiftItem(
+            id="123",
+            name="Test Gift",
+            category="Kitchen",
+            price=100.0,
+            rating=4.5,
+            image_url="https://example.com/image.jpg",
+            trendyol_url="https://example.com/product/123",
+            tags=["cooking"],
+            description="Test description",
+            age_suitability=(18, 100),
+            occasion_fit=["birthday"]
+        )
+        mock_recommendation.confidence_score = 0.85
+        mock_recommendation.reasoning = []
+        
+        # Mock _run_inference
+        async def mock_run_inference(*args, **kwargs):
+            reasoning_level = kwargs.get('reasoning_level', 'detailed')
+            reasoning_trace = {
+                "tool_selection": [{"name": "price_comparison", "selected": True}],
+                "category_matching": [{"category_name": "Kitchen", "score": 0.9}],
+                "confidence_explanation": None
+            }
+            return [mock_recommendation], {}, reasoning_trace
+        
+        with patch.object(service, '_run_inference', side_effect=mock_run_inference):
+            profile = UserProfile(
+                age=30,
+                hobbies=["cooking"],
+                relationship="friend",
+                budget=200.0,
+                occasion="birthday",
+                personality_traits=["practical"]
+            )
+            
+            recommendations, tool_results, reasoning_trace = await service.generate_recommendations(
+                profile,
+                [],
+                include_reasoning=True,
+                reasoning_level="detailed"
+            )
+            
+            assert recommendations is not None
+            assert reasoning_trace is not None
+            assert "tool_selection" in reasoning_trace
+            assert "category_matching" in reasoning_trace
+    
+    @pytest.mark.asyncio
+    async def test_reasoning_level_full(self):
+        """Test reasoning generation with full level"""
+        service = ModelInferenceService()
+        service.model_loaded = True
+        service.model = MagicMock()
+        
+        # Mock recommendation
+        mock_recommendation = MagicMock()
+        mock_recommendation.gift = GiftItem(
+            id="123",
+            name="Test Gift",
+            category="Kitchen",
+            price=100.0,
+            rating=4.5,
+            image_url="https://example.com/image.jpg",
+            trendyol_url="https://example.com/product/123",
+            tags=["cooking"],
+            description="Test description",
+            age_suitability=(18, 100),
+            occasion_fit=["birthday"]
+        )
+        mock_recommendation.confidence_score = 0.85
+        mock_recommendation.reasoning = []
+        
+        # Mock _run_inference
+        async def mock_run_inference(*args, **kwargs):
+            reasoning_level = kwargs.get('reasoning_level', 'detailed')
+            reasoning_trace = {
+                "tool_selection": [{"name": "price_comparison", "selected": True}],
+                "category_matching": [{"category_name": "Kitchen", "score": 0.9}],
+                "attention_weights": {
+                    "user_features": {"hobbies": 0.5, "budget": 0.3, "age": 0.1, "occasion": 0.1},
+                    "gift_features": {"category": 0.4, "price": 0.35, "rating": 0.25}
+                },
+                "thinking_steps": [
+                    {"step": 1, "action": "Encode user", "result": "Done", "insight": "Strong cooking interest"}
+                ],
+                "confidence_explanation": None
+            }
+            return [mock_recommendation], {}, reasoning_trace
+        
+        with patch.object(service, '_run_inference', side_effect=mock_run_inference):
+            profile = UserProfile(
+                age=30,
+                hobbies=["cooking"],
+                relationship="friend",
+                budget=200.0,
+                occasion="birthday",
+                personality_traits=["practical"]
+            )
+            
+            recommendations, tool_results, reasoning_trace = await service.generate_recommendations(
+                profile,
+                [],
+                include_reasoning=True,
+                reasoning_level="full"
+            )
+            
+            assert recommendations is not None
+            assert reasoning_trace is not None
+            assert "attention_weights" in reasoning_trace
+            assert "thinking_steps" in reasoning_trace
+    
+    @pytest.mark.asyncio
+    async def test_reasoning_generation_error_handling(self):
+        """Test that reasoning generation errors are handled gracefully"""
+        service = ModelInferenceService()
+        service.model_loaded = True
+        service.model = MagicMock()
+        
+        # Mock recommendation
+        mock_recommendation = MagicMock()
+        mock_recommendation.gift = GiftItem(
+            id="123",
+            name="Test Gift",
+            category="Kitchen",
+            price=100.0,
+            rating=4.5,
+            image_url="https://example.com/image.jpg",
+            trendyol_url="https://example.com/product/123",
+            tags=["cooking"],
+            description="Test description",
+            age_suitability=(18, 100),
+            occasion_fit=["birthday"]
+        )
+        mock_recommendation.confidence_score = 0.85
+        mock_recommendation.reasoning = []
+        
+        # Mock _run_inference to simulate error in reasoning extraction
+        async def mock_run_inference(*args, **kwargs):
+            # Return recommendations but reasoning extraction will fail
+            return [mock_recommendation], {}, None
+        
+        with patch.object(service, '_run_inference', side_effect=mock_run_inference):
+            profile = UserProfile(
+                age=30,
+                hobbies=["cooking"],
+                relationship="friend",
+                budget=200.0,
+                occasion="birthday",
+                personality_traits=["practical"]
+            )
+            
+            # Should not raise error, should fall back gracefully
+            recommendations, tool_results, reasoning_trace = await service.generate_recommendations(
+                profile,
+                [],
+                include_reasoning=True
+            )
+            
+            assert recommendations is not None
+            # Reasoning trace may be None due to error, which is acceptable
+    
+    def test_extract_reasoning_trace_with_valid_data(self):
+        """Test reasoning trace extraction with valid model output"""
+        service = ModelInferenceService()
+        
+        model_output = {
+            "reasoning_trace": {
+                "tool_selection": {
+                    "price_comparison": {
+                        "selected": True,
+                        "score": 0.85,
+                        "confidence": 0.85,
+                        "priority": 1,
+                        "factors": {}
+                    }
+                },
+                "category_matching": {
+                    "Kitchen": {
+                        "score": 0.9,
+                        "reasons": ["User hobby: cooking"],
+                        "feature_contributions": {"hobby_match": 0.9}
+                    }
+                }
+            },
+            "outputs": {}
+        }
+        
+        profile = UserProfile(
+            age=30,
+            hobbies=["cooking"],
+            relationship="friend",
+            budget=200.0,
+            occasion="birthday",
+            personality_traits=["practical"]
+        )
+        
+        mock_recommendation = MagicMock()
+        mock_recommendation.gift = GiftItem(
+            id="123",
+            name="Test Gift",
+            category="Kitchen",
+            price=100.0,
+            rating=4.5,
+            image_url="https://example.com/image.jpg",
+            trendyol_url="https://example.com/product/123"
+        )
+        mock_recommendation.confidence_score = 0.85
+        
+        reasoning_trace = service._extract_reasoning_trace(
+            model_output,
+            profile,
+            [mock_recommendation],
+            {},
+            "detailed"
+        )
+        
+        assert reasoning_trace is not None
+        assert "tool_selection" in reasoning_trace
+        assert "category_matching" in reasoning_trace
+    
+    def test_extract_reasoning_trace_with_empty_data(self):
+        """Test reasoning trace extraction with empty model output"""
+        service = ModelInferenceService()
+        
+        model_output = {
+            "reasoning_trace": {},
+            "outputs": {}
+        }
+        
+        profile = UserProfile(
+            age=30,
+            hobbies=["cooking"],
+            relationship="friend",
+            budget=200.0,
+            occasion="birthday",
+            personality_traits=["practical"]
+        )
+        
+        reasoning_trace = service._extract_reasoning_trace(
+            model_output,
+            profile,
+            [],
+            {},
+            "detailed"
+        )
+        
+        assert reasoning_trace is not None
+        assert "tool_selection" in reasoning_trace
+        assert "category_matching" in reasoning_trace
+    
+    def test_extract_reasoning_trace_error_handling(self):
+        """Test reasoning trace extraction handles errors gracefully"""
+        service = ModelInferenceService()
+        
+        # Invalid model output that will cause errors
+        model_output = {
+            "reasoning_trace": {
+                "tool_selection": "invalid_data"  # Should be dict
+            }
+        }
+        
+        profile = UserProfile(
+            age=30,
+            hobbies=["cooking"],
+            relationship="friend",
+            budget=200.0,
+            occasion="birthday",
+            personality_traits=["practical"]
+        )
+        
+        # Should not raise error, should return minimal trace
+        reasoning_trace = service._extract_reasoning_trace(
+            model_output,
+            profile,
+            [],
+            {},
+            "detailed"
+        )
+        
+        assert reasoning_trace is not None
+        assert "tool_selection" in reasoning_trace

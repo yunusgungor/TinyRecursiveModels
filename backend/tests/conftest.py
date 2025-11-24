@@ -118,7 +118,8 @@ def mock_model_service():
                     rank=1
                 )
             ],
-            {}  # tool_results
+            {},  # tool_results
+            None  # reasoning_trace
         ))
         mock.return_value = service_instance
         yield service_instance

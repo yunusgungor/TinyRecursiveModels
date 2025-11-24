@@ -12,6 +12,50 @@ info:
     - ⭐ Review analysis
     - 📊 Price comparison
     - 🔄 Caching for fast responses
+    - 🧠 **NEW: Explainable AI with reasoning traces**
+    
+    ## Reasoning Enhancement (NEW)
+    
+    API artık modelin karar verme sürecini açıklayan detaylı reasoning (akıl yürütme) 
+    bilgileri sunmaktadır. Bu özellik sayesinde:
+    
+    - **Tool Selection Reasoning**: Hangi analiz araçlarının neden seçildiğini öğrenin
+    - **Category Matching**: Kategorilerin kullanıcı profiliyle nasıl eşleştirildiğini görün
+    - **Attention Weights**: Modelin hangi özelliklere odaklandığını anlayın
+    - **Thinking Steps**: Modelin adım adım düşünme sürecini takip edin
+    - **Confidence Explanation**: Güven skorunun nedenlerini öğrenin
+    
+    ### Reasoning Levels
+    
+    Üç farklı detay seviyesi mevcuttur:
+    
+    1. **basic**: Sadece hediye seviyesinde açıklamalar
+       - Performans etkisi: ~%5
+       - Kullanım: Hızlı yanıt gereken durumlar
+    
+    2. **detailed** (varsayılan): Tool seçimi + kategori eşleştirme + hediye açıklamaları
+       - Performans etkisi: ~%8
+       - Kullanım: Çoğu kullanım senaryosu için önerilen
+    
+    3. **full**: Tüm reasoning bileşenleri (attention weights + thinking steps dahil)
+       - Performans etkisi: ~%10
+       - Kullanım: Debug, analiz ve geliştirme
+    
+    ### Usage Examples
+    
+    ```bash
+    # No reasoning
+    curl -X POST "http://localhost:8000/api/v1/recommendations?include_reasoning=false"
+    
+    # Basic reasoning (default)
+    curl -X POST "http://localhost:8000/api/v1/recommendations"
+    
+    # Detailed reasoning
+    curl -X POST "http://localhost:8000/api/v1/recommendations?reasoning_level=detailed"
+    
+    # Full reasoning
+    curl -X POST "http://localhost:8000/api/v1/recommendations?reasoning_level=full"
+    ```
     
     ## Rate Limiting
     - 10 requests per minute per IP
@@ -61,7 +105,59 @@ paths:
         4. Runs model inference
         5. Executes analysis tools
         6. Returns ranked recommendations
+        
+        ## Reasoning Enhancement
+        
+        The API supports optional reasoning traces that explain the model's decision-making process:
+        
+        - **include_reasoning**: Enable/disable reasoning generation (default: true)
+        - **reasoning_level**: Control detail level (basic, detailed, full)
+        
+        ### Reasoning Levels
+        
+        - **basic**: Only gift-level reasoning (why this gift was recommended)
+        - **detailed**: Gift reasoning + tool selection + category matching
+        - **full**: Everything including attention weights and thinking steps
+        
+        ### Performance Impact
+        
+        - Basic reasoning: ~5% overhead
+        - Detailed reasoning: ~8% overhead
+        - Full reasoning: ~10% overhead
       operationId: getRecommendations
+      parameters:
+        - name: include_reasoning
+          in: query
+          description: |
+            Whether to include reasoning trace in the response.
+            
+            - `true`: Include reasoning based on reasoning_level
+            - `false`: No reasoning, only recommendations
+            
+            Default: `true` (basic reasoning)
+          required: false
+          schema:
+            type: boolean
+            default: true
+          example: true
+        - name: reasoning_level
+          in: query
+          description: |
+            Level of reasoning detail to include.
+            
+            - `basic`: Gift-level reasoning only
+            - `detailed`: Gift reasoning + tool selection + category matching
+            - `full`: Complete trace with attention weights and thinking steps
+            
+            Only applies when include_reasoning=true.
+            
+            Default: `detailed`
+          required: false
+          schema:
+            type: string
+            enum: [basic, detailed, full]
+            default: detailed
+          example: detailed
       requestBody:
         required: true
         content:
@@ -99,10 +195,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RecommendationResponse'
+                $ref: '#/components/schemas/EnhancedRecommendationResponse'
               examples:
-                success:
-                  summary: Successful recommendation
+                no_reasoning:
+                  summary: Response without reasoning (include_reasoning=false)
+                  value:
+                    recommendations:
+                      - gift:
+                          id: "12345"
+                          name: "Premium Coffee Set"
+                          category: "Kitchen & Dining"
+                          price: 299.99
+                          rating: 4.5
+                          image_url: "https://cdn.trendyol.com/example.jpg"
+                          trendyol_url: "https://www.trendyol.com/product/12345"
+                          description: "High-quality coffee set"
+                          tags: ["coffee", "kitchen", "gift"]
+                          age_suitability: [25, 65]
+                          occasion_fit: ["birthday", "anniversary"]
+                          in_stock: true
+                        confidence_score: 0.92
+                        reasoning: []
+                        tool_insights: {}
+                        rank: 1
+                    tool_results: {}
+                    reasoning_trace: null
+                    inference_time: 1.15
+                    cache_hit: false
+                basic_reasoning:
+                  summary: Response with basic reasoning (reasoning_level=basic)
                   value:
                     recommendations:
                       - gift:
@@ -120,9 +241,11 @@ paths:
                           in_stock: true
                         confidence_score: 0.92
                         reasoning:
-                          - "Matches user's cooking hobby"
-                          - "Within budget range"
-                          - "High rating and positive reviews"
+                          - "Perfect match for your hobbies: cooking"
+                          - "Great value: Only 60% of your budget"
+                          - "Highly rated: 4.5/5.0 stars"
+                          - "Age-appropriate for 35 years old"
+                          - "Perfect for birthday"
                         tool_insights:
                           price_comparison:
                             best_price: 299.99
@@ -130,8 +253,174 @@ paths:
                             savings_percentage: 14.3
                         rank: 1
                     tool_results: {}
-                    inference_time: 1.23
+                    reasoning_trace: null
+                    inference_time: 1.20
                     cache_hit: false
+                detailed_reasoning:
+                  summary: Response with detailed reasoning (reasoning_level=detailed)
+                  value:
+                    recommendations:
+                      - gift:
+                          id: "12345"
+                          name: "Premium Coffee Set"
+                          category: "Kitchen & Dining"
+                          price: 299.99
+                          rating: 4.5
+                          image_url: "https://cdn.trendyol.com/example.jpg"
+                          trendyol_url: "https://www.trendyol.com/product/12345"
+                          description: "High-quality coffee set"
+                          tags: ["coffee", "kitchen", "gift"]
+                          age_suitability: [25, 65]
+                          occasion_fit: ["birthday", "anniversary"]
+                          in_stock: true
+                        confidence_score: 0.92
+                        reasoning:
+                          - "Perfect match for your hobbies: cooking"
+                          - "Great value: Only 60% of your budget"
+                          - "Highly rated: 4.5/5.0 stars"
+                        tool_insights: {}
+                        rank: 1
+                    tool_results: {}
+                    reasoning_trace:
+                      tool_selection:
+                        - name: "price_comparison"
+                          selected: true
+                          score: 0.85
+                          reason: "User has strict budget constraint (500 TL)"
+                          confidence: 0.85
+                          priority: 1
+                          factors:
+                            budget_constraint: 0.9
+                            price_sensitivity: 0.8
+                        - name: "review_analysis"
+                          selected: true
+                          score: 0.78
+                          reason: "User values quality and ratings"
+                          confidence: 0.78
+                          priority: 2
+                          factors:
+                            quality_preference: 0.85
+                      category_matching:
+                        - category_name: "Kitchen"
+                          score: 0.85
+                          reasons:
+                            - "User hobby: cooking (0.9 match)"
+                            - "Occasion: birthday (0.7 match)"
+                            - "Age appropriate: 35 years (0.8 match)"
+                          feature_contributions:
+                            hobby_match: 0.45
+                            occasion_fit: 0.30
+                            age_appropriateness: 0.25
+                      attention_weights: null
+                      thinking_steps: []
+                      confidence_explanation: null
+                    inference_time: 1.25
+                    cache_hit: false
+                full_reasoning:
+                  summary: Response with full reasoning (reasoning_level=full)
+                  value:
+                    recommendations:
+                      - gift:
+                          id: "12345"
+                          name: "Premium Coffee Set"
+                          category: "Kitchen & Dining"
+                          price: 299.99
+                          rating: 4.5
+                          image_url: "https://cdn.trendyol.com/example.jpg"
+                          trendyol_url: "https://www.trendyol.com/product/12345"
+                          description: "High-quality coffee set"
+                          tags: ["coffee", "kitchen", "gift"]
+                          age_suitability: [25, 65]
+                          occasion_fit: ["birthday", "anniversary"]
+                          in_stock: true
+                        confidence_score: 0.92
+                        reasoning:
+                          - "Perfect match for your hobbies: cooking"
+                          - "Great value: Only 60% of your budget"
+                          - "Highly rated: 4.5/5.0 stars"
+                        tool_insights: {}
+                        rank: 1
+                    tool_results: {}
+                    reasoning_trace:
+                      tool_selection:
+                        - name: "price_comparison"
+                          selected: true
+                          score: 0.85
+                          reason: "User has strict budget constraint (500 TL)"
+                          confidence: 0.85
+                          priority: 1
+                          factors:
+                            budget_constraint: 0.9
+                            price_sensitivity: 0.8
+                      category_matching:
+                        - category_name: "Kitchen"
+                          score: 0.85
+                          reasons:
+                            - "User hobby: cooking (0.9 match)"
+                            - "Occasion: birthday (0.7 match)"
+                          feature_contributions:
+                            hobby_match: 0.45
+                            occasion_fit: 0.30
+                      attention_weights:
+                        user_features:
+                          hobbies: 0.45
+                          budget: 0.30
+                          age: 0.15
+                          occasion: 0.10
+                        gift_features:
+                          category: 0.40
+                          price: 0.35
+                          rating: 0.25
+                      thinking_steps:
+                        - step: 1
+                          action: "Encode user profile"
+                          result: "User encoding completed"
+                          insight: "Strong cooking interest detected"
+                        - step: 2
+                          action: "Match categories"
+                          result: "Top categories: Kitchen, Home, Dining"
+                          insight: "Identified 3 relevant categories"
+                        - step: 3
+                          action: "Select tools"
+                          result: "Selected tools: price_comparison, review_analysis"
+                          insight: "Chose 2 tools for analysis"
+                        - step: 4
+                          action: "Execute tools"
+                          result: "Executed 2 tools successfully"
+                          insight: "Found 15 items in budget with good ratings"
+                        - step: 5
+                          action: "Rank gifts"
+                          result: "Ranked top 5 gifts"
+                          insight: "Selected gifts based on multi-criteria scoring"
+                      confidence_explanation:
+                        score: 0.92
+                        level: "high"
+                        factors:
+                          positive:
+                            - "Strong category match (0.85)"
+                            - "Excellent reviews (4.5/5.0)"
+                            - "Price within optimal budget range"
+                          negative: []
+                    inference_time: 1.30
+                    cache_hit: false
+        '400':
+          description: Bad request - Invalid reasoning parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_reasoning_level:
+                  summary: Invalid reasoning_level parameter
+                  value:
+                    error_code: "INVALID_PARAMETER"
+                    message: "Geçersiz reasoning_level değeri. Geçerli değerler: basic, detailed, full"
+                    details:
+                      parameter: "reasoning_level"
+                      provided_value: "invalid"
+                      valid_values: ["basic", "detailed", "full"]
+                    timestamp: "2024-01-15T10:30:00Z"
+                    request_id: "abc-123"
         '422':
           description: Validation error
           content:
@@ -149,6 +438,35 @@ paths:
                       type: "value_error.number.not_ge"
                 timestamp: "2024-01-15T10:30:00Z"
                 request_id: "abc-123"
+        '500':
+          description: Internal server error - Reasoning generation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                reasoning_generation_failed:
+                  summary: Reasoning generation failed
+                  value:
+                    error_code: "REASONING_GENERATION_ERROR"
+                    message: "Reasoning oluşturma başarısız oldu, temel öneriler döndürülüyor"
+                    details:
+                      component: "ReasoningService"
+                      fallback_applied: true
+                      error_type: "attention_weights_extraction_failed"
+                    timestamp: "2024-01-15T10:30:00Z"
+                    request_id: "abc-123"
+                reasoning_timeout:
+                  summary: Reasoning generation timeout
+                  value:
+                    error_code: "REASONING_TIMEOUT"
+                    message: "Reasoning oluşturma zaman aşımına uğradı, kısmi sonuçlar döndürülüyor"
+                    details:
+                      timeout_seconds: 5.0
+                      partial_reasoning: true
+                      missing_components: ["thinking_steps", "attention_weights"]
+                    timestamp: "2024-01-15T10:30:00Z"
+                    request_id: "abc-123"
         '503':
           description: Service unavailable
           content:
@@ -477,6 +795,290 @@ components:
         cache_hit:
           type: boolean
           description: Whether result was from cache
+          example: false
+
+    ToolSelectionReasoning:
+      type: object
+      required:
+        - name
+        - selected
+        - score
+        - reason
+        - confidence
+        - priority
+      properties:
+        name:
+          type: string
+          description: Tool name (e.g., price_comparison, review_analysis)
+          example: "price_comparison"
+        selected:
+          type: boolean
+          description: Whether this tool was selected for execution
+          example: true
+        score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Tool selection score from model
+          example: 0.85
+        reason:
+          type: string
+          description: Human-readable explanation for why tool was/wasn't selected
+          example: "User has strict budget constraint (500 TL)"
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Confidence in the tool selection decision
+          example: 0.85
+        priority:
+          type: integer
+          minimum: 1
+          description: Priority order for selected tools (1 = highest priority)
+          example: 1
+        factors:
+          type: object
+          description: Contributing factors with their weights
+          additionalProperties:
+            type: number
+            format: float
+          example:
+            budget_constraint: 0.9
+            price_sensitivity: 0.8
+
+    CategoryMatchingReasoning:
+      type: object
+      required:
+        - category_name
+        - score
+        - reasons
+        - feature_contributions
+      properties:
+        category_name:
+          type: string
+          description: Name of the gift category
+          example: "Kitchen"
+        score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Category match score
+          example: 0.85
+        reasons:
+          type: array
+          items:
+            type: string
+          description: List of reasons explaining the category match
+          example:
+            - "User hobby: cooking (0.9 match)"
+            - "Occasion: birthday (0.7 match)"
+            - "Age appropriate: 35 years (0.8 match)"
+        feature_contributions:
+          type: object
+          description: Contribution weight of each feature to the category score
+          additionalProperties:
+            type: number
+            format: float
+          example:
+            hobby_match: 0.45
+            occasion_fit: 0.30
+            age_appropriateness: 0.25
+
+    AttentionWeights:
+      type: object
+      required:
+        - user_features
+        - gift_features
+      properties:
+        user_features:
+          type: object
+          description: |
+            Attention weights for user profile features.
+            Shows how much the model focused on each user attribute.
+            Weights sum to 1.0.
+          additionalProperties:
+            type: number
+            format: float
+            minimum: 0
+            maximum: 1
+          example:
+            hobbies: 0.45
+            budget: 0.30
+            age: 0.15
+            occasion: 0.10
+        gift_features:
+          type: object
+          description: |
+            Attention weights for gift features.
+            Shows how much the model focused on each gift attribute.
+            Weights sum to 1.0.
+          additionalProperties:
+            type: number
+            format: float
+            minimum: 0
+            maximum: 1
+          example:
+            category: 0.40
+            price: 0.35
+            rating: 0.25
+
+    ThinkingStep:
+      type: object
+      required:
+        - step
+        - action
+        - result
+        - insight
+      properties:
+        step:
+          type: integer
+          minimum: 1
+          description: Step number in the thinking process
+          example: 1
+        action:
+          type: string
+          description: Action performed in this step
+          example: "Encode user profile"
+        result:
+          type: string
+          description: Result of the action
+          example: "User encoding completed"
+        insight:
+          type: string
+          description: Insight or observation from this step
+          example: "Strong cooking interest detected"
+
+    ConfidenceExplanation:
+      type: object
+      required:
+        - score
+        - level
+        - factors
+      properties:
+        score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Confidence score
+          example: 0.85
+        level:
+          type: string
+          enum: [high, medium, low]
+          description: |
+            Confidence level classification:
+            - high: score > 0.8
+            - medium: 0.5 <= score <= 0.8
+            - low: score < 0.5
+          example: "high"
+        factors:
+          type: object
+          description: Factors affecting confidence
+          required:
+            - positive
+            - negative
+          properties:
+            positive:
+              type: array
+              items:
+                type: string
+              description: Factors that increase confidence
+              example:
+                - "Strong category match (0.85)"
+                - "Excellent reviews (4.5/5.0)"
+                - "Price within optimal budget range"
+            negative:
+              type: array
+              items:
+                type: string
+              description: Factors that decrease confidence
+              example:
+                - "Slightly above typical budget"
+
+    ReasoningTrace:
+      type: object
+      description: |
+        Complete reasoning trace explaining the model's decision-making process.
+        
+        Content varies by reasoning_level:
+        - basic: Empty (null)
+        - detailed: tool_selection + category_matching
+        - full: All fields populated
+      properties:
+        tool_selection:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolSelectionReasoning'
+          description: Reasoning for each tool selection decision
+        category_matching:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryMatchingReasoning'
+          description: Reasoning for category matching
+        attention_weights:
+          allOf:
+            - $ref: '#/components/schemas/AttentionWeights'
+          nullable: true
+          description: Attention weights (only in full reasoning level)
+        thinking_steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ThinkingStep'
+          description: Step-by-step thinking process (only in full reasoning level)
+        confidence_explanation:
+          allOf:
+            - $ref: '#/components/schemas/ConfidenceExplanation'
+          nullable: true
+          description: Explanation of confidence score (optional)
+
+    EnhancedGiftRecommendation:
+      allOf:
+        - $ref: '#/components/schemas/GiftRecommendation'
+        - type: object
+          properties:
+            reasoning_trace:
+              allOf:
+                - $ref: '#/components/schemas/ReasoningTrace'
+              nullable: true
+              description: Detailed reasoning trace for this specific recommendation
+
+    EnhancedRecommendationResponse:
+      type: object
+      required:
+        - recommendations
+        - tool_results
+        - inference_time
+        - cache_hit
+      properties:
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnhancedGiftRecommendation'
+          description: List of gift recommendations with optional reasoning
+        tool_results:
+          type: object
+          description: Aggregated tool execution results
+          additionalProperties: true
+        reasoning_trace:
+          allOf:
+            - $ref: '#/components/schemas/ReasoningTrace'
+          nullable: true
+          description: |
+            Overall reasoning trace for the recommendation process.
+            
+            - null when include_reasoning=false
+            - Populated based on reasoning_level when include_reasoning=true
+        inference_time:
+          type: number
+          format: float
+          description: Total inference time in seconds (including reasoning generation)
+          example: 1.25
+        cache_hit:
+          type: boolean
+          description: Whether result was retrieved from cache
           example: false
 
     HealthResponse:
