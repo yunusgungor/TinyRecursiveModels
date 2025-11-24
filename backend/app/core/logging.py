@@ -25,8 +25,7 @@ def setup_logging() -> logging.Logger:
     
     # JSON formatter
     json_formatter = jsonlogger.JsonFormatter(
-        "%(timestamp)s %(level)s %(name)s %(message)s %(pathname)s %(lineno)d",
-        rename_fields={"levelname": "level", "asctime": "timestamp"}
+        "%(asctime)s %(levelname)s %(name)s %(message)s %(pathname)s %(lineno)d"
     )
     
     # Console handler

@@ -1,5 +1,6 @@
 import { GiftRecommendation, ToolResults } from '@/lib/api/types';
 import { useAppStore } from '@/store/useAppStore';
+import { LazyImage } from './LazyImage';
 
 interface RecommendationCardProps {
   recommendation: GiftRecommendation;
@@ -121,11 +122,11 @@ export function RecommendationCard({
 
       {/* Product Image */}
       <div className="relative aspect-square w-full overflow-hidden bg-gray-100 dark:bg-gray-700">
-        <img
+        <LazyImage
           src={gift.imageUrl}
           alt={gift.name}
           className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-          loading="lazy"
+          placeholderClassName="aspect-square"
         />
         {!gift.inStock && (
           <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">

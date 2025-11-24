@@ -1,0 +1,56 @@
+# Code Owners
+# Bu dosya, belirli dosya ve dizinler için otomatik reviewer ataması yapar
+# Her satır bir file pattern ve owner(lar) içerir
+
+# Global owners (tüm dosyalar için)
+* @team-lead
+
+# Backend
+/backend/ @backend-team
+/backend/app/api/ @backend-team @api-team
+/backend/app/services/ @backend-team
+/backend/app/models/ @backend-team @data-team
+/backend/tests/ @backend-team @qa-team
+
+# Frontend
+/frontend/ @frontend-team
+/frontend/src/components/ @frontend-team @ui-team
+/frontend/src/pages/ @frontend-team
+/frontend/src/lib/ @frontend-team
+/frontend/src/test/ @frontend-team @qa-team
+
+# Models and ML
+/models/ @ml-team
+/checkpoints/ @ml-team
+/config/ @ml-team
+
+# Infrastructure
+/k8s/ @devops-team
+/docker-compose*.yml @devops-team
+/backend/Dockerfile @devops-team @backend-team
+/frontend/Dockerfile @devops-team @frontend-team
+/nginx/ @devops-team
+
+# CI/CD
+/.github/ @devops-team
+/.github/workflows/ @devops-team @team-lead
+
+# Documentation
+*.md @tech-writer @team-lead
+/docs/ @tech-writer
+
+# Configuration
+.env.* @devops-team @team-lead
+*.yaml @devops-team
+*.yml @devops-team
+
+# Security
+/backend/app/core/security.py @security-team @backend-team
+/backend/app/middleware/ @security-team @backend-team
+
+# Database
+/backend/app/models/schemas.py @data-team @backend-team
+
+# Dependencies
+/backend/requirements*.txt @backend-team @security-team
+/frontend/package*.json @frontend-team @security-team

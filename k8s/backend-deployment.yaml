@@ -1,0 +1,161 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: trendyol-gift
+  labels:
+    app: backend
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: trendyol-gift-backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)"
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: trendyol-gift-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trendyol-gift-secrets
+              key: POSTGRES_PASSWORD
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trendyol-gift-secrets
+              key: REDIS_PASSWORD
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trendyol-gift-secrets
+              key: SECRET_KEY
+        - name: TRENDYOL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trendyol-gift-secrets
+              key: TRENDYOL_API_KEY
+        - name: TRENDYOL_API_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: trendyol-gift-secrets
+              key: TRENDYOL_API_SECRET
+        - name: DATABASE_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: trendyol-gift-config
+              key: DATABASE_HOST
+        - name: DATABASE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: trendyol-gift-config
+              key: DATABASE_PORT
+        - name: DATABASE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: trendyol-gift-config
+              key: DATABASE_NAME
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: trendyol-gift-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: trendyol-gift-config
+              key: REDIS_PORT
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: trendyol-gift-config
+              key: ENVIRONMENT
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: trendyol-gift-config
+              key: LOG_LEVEL
+        - name: MODEL_CHECKPOINT_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: trendyol-gift-config
+              key: MODEL_CHECKPOINT_PATH
+        volumeMounts:
+        - name: model-checkpoints
+          mountPath: /app/checkpoints
+          readOnly: true
+        - name: model-code
+          mountPath: /app/models
+          readOnly: true
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: model-checkpoints
+        hostPath:
+          path: /mnt/data/checkpoints
+          type: Directory
+      - name: model-code
+        hostPath:
+          path: /mnt/data/models
+          type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: trendyol-gift
+  labels:
+    app: backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: backend
+  sessionAffinity: ClientIP

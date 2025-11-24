@@ -57,3 +57,17 @@ async def get_resources() -> Dict[str, Any]:
     - GPU usage (if available)
     """
     return monitoring_service.get_resource_metrics()
+
+
+@router.get("/performance")
+async def get_performance() -> Dict[str, Any]:
+    """
+    Get performance metrics
+    
+    Returns:
+    - Average inference time
+    - Average response time
+    - Total inferences
+    - Total requests
+    """
+    return monitoring_service.get_performance_metrics()

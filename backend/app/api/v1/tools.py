@@ -26,17 +26,3 @@ async def get_tool_stats() -> ToolStatsResponse:
         success_rates=stats["success_rates"],
         average_execution_times=stats["average_execution_times"]
     )
-
-
-@router.get("/performance")
-async def get_performance_metrics() -> Dict[str, Any]:
-    """
-    Get performance metrics
-    
-    Returns:
-    - Average inference time
-    - Average response time
-    - Total inferences
-    - Total requests
-    """
-    return monitoring_service.metrics_collector.get_performance_metrics()

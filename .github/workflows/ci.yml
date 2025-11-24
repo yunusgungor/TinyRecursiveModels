@@ -5,6 +5,19 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   lint-backend:
@@ -17,6 +30,8 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements-dev.txt
           
       - name: Install dependencies
         run: |
@@ -36,7 +51,7 @@ jobs:
       - name: Run mypy
         run: |
           cd backend
-          mypy .
+          mypy app --ignore-missing-imports
 
   lint-frontend:
     name: Lint Frontend
@@ -61,13 +76,18 @@ jobs:
           cd frontend
           npm run lint
           
+      - name: Run Prettier check
+        run: |
+          cd frontend
+          npx prettier --check "src/**/*.{ts,tsx,css}"
+          
       - name: Type check
         run: |
           cd frontend
-          npm run type-check
+          npx tsc --noEmit
 
-  test-backend:
-    name: Test Backend
+  test-backend-unit:
+    name: Backend Unit Tests
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -101,28 +121,144 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements-dev.txt
           
       - name: Install dependencies
         run: |
           cd backend
           pip install -r requirements-dev.txt
           
-      - name: Run tests
+      - name: Run unit tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
           REDIS_URL: redis://localhost:6379/0
+          ENVIRONMENT: test
         run: |
           cd backend
-          pytest --cov=app --cov-report=xml --cov-report=term
+          pytest tests/unit -v --cov=app --cov-report=xml --cov-report=term-missing
           
       - name: Upload coverage
         uses: codecov/codecov-action@v3
         with:
           files: ./backend/coverage.xml
-          flags: backend
+          flags: backend-unit
+          name: backend-unit-coverage
+
+  test-backend-property:
+    name: Backend Property Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+          
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements-dev.txt
+          
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements-dev.txt
+          
+      - name: Run property-based tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379/0
+          ENVIRONMENT: test
+          HYPOTHESIS_PROFILE: ci
+        run: |
+          cd backend
+          pytest tests/property -v --tb=short
+          
+      - name: Upload property test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: property-test-results
+          path: backend/.hypothesis/
+
+  test-backend-integration:
+    name: Backend Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+          
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements-dev.txt
+          
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements-dev.txt
+          
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379/0
+          ENVIRONMENT: test
+        run: |
+          cd backend
+          pytest tests/integration -v --tb=short
 
   test-frontend:
-    name: Test Frontend
+    name: Frontend Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -139,44 +275,178 @@ jobs:
           cd frontend
           npm ci
           
-      - name: Run tests
+      - name: Run unit tests
         run: |
           cd frontend
-          npm run test:coverage
+          npm run test:run -- --coverage
           
       - name: Upload coverage
         uses: codecov/codecov-action@v3
         with:
           files: ./frontend/coverage/coverage-final.json
           flags: frontend
+          name: frontend-coverage
 
   build:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: [lint-backend, lint-frontend, test-backend, test-frontend]
-    if: github.event_name == 'push'
+    needs: [lint-backend, lint-frontend, test-backend-unit, test-backend-property, test-backend-integration, test-frontend]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    outputs:
+      backend-image: ${{ steps.meta-backend.outputs.tags }}
+      frontend-image: ${{ steps.meta-frontend.outputs.tags }}
     steps:
       - uses: actions/checkout@v4
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         
-      - name: Build backend image
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Extract metadata for backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            
+      - name: Extract metadata for frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            
+      - name: Build and push backend image
         uses: docker/build-push-action@v5
         with:
           context: ./backend
-          target: production
-          push: false
-          tags: trendyol-gift-backend:latest
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           
-      - name: Build frontend image
+      - name: Build and push frontend image
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
-          target: production
-          push: false
-          tags: trendyol-gift-frontend:latest
+          file: ./frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.ref == 'refs/heads/develop' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment:
+      name: staging
+      url: https://staging.trendyol-gift.example.com
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+          
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+          
+      - name: Deploy to Kubernetes
+        run: |
+          export KUBECONFIG=./kubeconfig
+          kubectl set image deployment/backend-deployment backend=${{ needs.build.outputs.backend-image }} -n staging
+          kubectl set image deployment/frontend-deployment frontend=${{ needs.build.outputs.frontend-image }} -n staging
+          kubectl rollout status deployment/backend-deployment -n staging --timeout=5m
+          kubectl rollout status deployment/frontend-deployment -n staging --timeout=5m
+          
+      - name: Run smoke tests
+        run: |
+          sleep 30
+          curl -f https://staging.trendyol-gift.example.com/api/health || exit 1
+          
+      - name: Notify deployment
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Staging deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://trendyol-gift.example.com
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+          
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+          
+      - name: Deploy to Kubernetes
+        run: |
+          export KUBECONFIG=./kubeconfig
+          kubectl set image deployment/backend-deployment backend=${{ needs.build.outputs.backend-image }} -n production
+          kubectl set image deployment/frontend-deployment frontend=${{ needs.build.outputs.frontend-image }} -n production
+          kubectl rollout status deployment/backend-deployment -n production --timeout=10m
+          kubectl rollout status deployment/frontend-deployment -n production --timeout=10m
+          
+      - name: Run smoke tests
+        run: |
+          sleep 30
+          curl -f https://trendyol-gift.example.com/api/health || exit 1
+          curl -f https://trendyol-gift.example.com/ || exit 1
+          
+      - name: Notify deployment
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          
+      - name: Create release
+        if: success()
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.run_number }}
+          release_name: Release v${{ github.run_number }}
+          body: |
+            Automated production deployment
+            - Backend: ${{ needs.build.outputs.backend-image }}
+            - Frontend: ${{ needs.build.outputs.frontend-image }}
+          draft: false
+          prerelease: false

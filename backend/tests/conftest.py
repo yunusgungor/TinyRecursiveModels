@@ -32,16 +32,25 @@ def load_model():
         print(f"\n⚠ Model checkpoint not found at {settings.MODEL_CHECKPOINT_PATH}")
 
 
-@pytest.fixture
-def app():
+@pytest.fixture(scope="function")
+def app(monkeypatch):
     """Create FastAPI application for testing"""
+    # Disable rate limiting for tests by patching settings
+    monkeypatch.setattr("app.core.config.settings.RATE_LIMIT_ENABLED", False)
+    monkeypatch.setattr("app.core.config.settings.DEBUG", True)
+    
     return create_application()
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def client(app):
     """Create test client"""
-    return TestClient(app)
+    # Clear rate limiter state before each test
+    from app.middleware.rate_limiter import rate_limiter
+    rate_limiter.requests.clear()
+    
+    # Create a new client for each test with HTTPS base URL to avoid redirects
+    return TestClient(app, base_url="https://testserver", raise_server_exceptions=False)
 
 
 @pytest.fixture
@@ -74,3 +83,42 @@ def sample_gift_item():
         "occasion_fit": ["birthday", "anniversary"],
         "in_stock": True
     }
+
+
+@pytest.fixture
+def mock_model_service():
+    """Mock model inference service for testing"""
+    from unittest.mock import MagicMock, AsyncMock, patch
+    from app.models.schemas import GiftRecommendation, GiftItem
+    
+    with patch('app.api.v1.recommendations.get_model_service') as mock:
+        service_instance = MagicMock()
+        service_instance.model_loaded = True
+        service_instance.is_loaded = MagicMock(return_value=True)
+        service_instance.generate_recommendations = AsyncMock(return_value=(
+            [
+                GiftRecommendation(
+                    gift=GiftItem(
+                        id="12345",
+                        name="Premium Coffee Set",
+                        category="Kitchen & Dining",
+                        price=299.99,
+                        rating=4.5,
+                        image_url="https://cdn.trendyol.com/example.jpg",
+                        trendyol_url="https://www.trendyol.com/product/12345",
+                        description="High-quality coffee set",
+                        tags=["coffee", "kitchen", "gift"],
+                        age_suitability=(25, 65),
+                        occasion_fit=["birthday", "anniversary"],
+                        in_stock=True
+                    ),
+                    confidence_score=0.85,
+                    reasoning=["Matches hobbies", "Within budget"],
+                    tool_insights={},
+                    rank=1
+                )
+            ],
+            {}  # tool_results
+        ))
+        mock.return_value = service_instance
+        yield service_instance

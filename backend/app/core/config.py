@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # Security Settings
     SECRET_KEY: str = "your-secret-key-change-in-production"
     RATE_LIMIT_PER_MINUTE: int = 10
+    RATE_LIMIT_ENABLED: bool = True
     SESSION_TIMEOUT_MINUTES: int = 30
     
     # Email Alert Settings
@@ -60,6 +61,20 @@ class Settings(BaseSettings):
     ALERT_EMAIL_TO: str = ""
     ALERT_EMAIL_FROM: str = ""
     ENABLE_EMAIL_ALERTS: bool = False
+    
+    # Monitoring and Tracing Settings
+    ENABLE_TRACING: bool = True
+    JAEGER_HOST: str = "jaeger"
+    JAEGER_PORT: int = 6831
+    
+    # Database Settings
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_DB: str = "trendyol_gift_db"
+    DB_POOL_MIN_SIZE: int = 10
+    DB_POOL_MAX_SIZE: int = 50
     
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -1,0 +1,152 @@
+name: Release Management
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            # First release
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            # Generate changelog since last tag
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          
+          # Categorize commits
+          FEATURES=$(echo "$CHANGELOG" | grep -i "^- feat" || echo "")
+          FIXES=$(echo "$CHANGELOG" | grep -i "^- fix" || echo "")
+          DOCS=$(echo "$CHANGELOG" | grep -i "^- docs" || echo "")
+          CHORES=$(echo "$CHANGELOG" | grep -i "^- chore\|^- ci\|^- build" || echo "")
+          
+          # Build release notes
+          RELEASE_NOTES="## Release ${{ steps.version.outputs.version }}"
+          RELEASE_NOTES="$RELEASE_NOTES\n\n### 🚀 Features"
+          if [ -n "$FEATURES" ]; then
+            RELEASE_NOTES="$RELEASE_NOTES\n$FEATURES"
+          else
+            RELEASE_NOTES="$RELEASE_NOTES\nNo new features in this release."
+          fi
+          
+          RELEASE_NOTES="$RELEASE_NOTES\n\n### 🐛 Bug Fixes"
+          if [ -n "$FIXES" ]; then
+            RELEASE_NOTES="$RELEASE_NOTES\n$FIXES"
+          else
+            RELEASE_NOTES="$RELEASE_NOTES\nNo bug fixes in this release."
+          fi
+          
+          RELEASE_NOTES="$RELEASE_NOTES\n\n### 📚 Documentation"
+          if [ -n "$DOCS" ]; then
+            RELEASE_NOTES="$RELEASE_NOTES\n$DOCS"
+          else
+            RELEASE_NOTES="$RELEASE_NOTES\nNo documentation changes in this release."
+          fi
+          
+          RELEASE_NOTES="$RELEASE_NOTES\n\n### 🔧 Maintenance"
+          if [ -n "$CHORES" ]; then
+            RELEASE_NOTES="$RELEASE_NOTES\n$CHORES"
+          else
+            RELEASE_NOTES="$RELEASE_NOTES\nNo maintenance changes in this release."
+          fi
+          
+          # Save to file
+          echo -e "$RELEASE_NOTES" > release_notes.md
+          
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Notify Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Release ${{ steps.version.outputs.version }} has been created!
+            View release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.version }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  update-changelog:
+    name: Update CHANGELOG.md
+    runs-on: ubuntu-latest
+    needs: create-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Update CHANGELOG
+        run: |
+          # Generate changelog using git-chglog or similar tool
+          # For now, we'll use a simple approach
+          
+          VERSION="${GITHUB_REF#refs/tags/}"
+          DATE=$(date +%Y-%m-%d)
+          
+          # Create new changelog entry
+          echo "## [$VERSION] - $DATE" > new_entry.md
+          echo "" >> new_entry.md
+          
+          # Get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges >> new_entry.md
+          else
+            git log --pretty=format:"- %s" --no-merges >> new_entry.md
+          fi
+          
+          # Prepend to CHANGELOG.md
+          if [ -f CHANGELOG.md ]; then
+            cat new_entry.md CHANGELOG.md > temp.md
+            mv temp.md CHANGELOG.md
+          else
+            mv new_entry.md CHANGELOG.md
+          fi
+          
+      - name: Commit CHANGELOG
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs: update CHANGELOG for ${GITHUB_REF#refs/tags/}"
+          git push

@@ -1,0 +1,105 @@
+{
+  "dashboard": {
+    "title": "Tool Analytics Dashboard",
+    "tags": ["tools", "analytics"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Tool Usage Count",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "tool_usage",
+            "legendFormat": "{{tool}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "short", "label": "Count"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Tool Success Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "tool_success_rate",
+            "legendFormat": "{{tool}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percentunit", "label": "Success Rate", "max": 1, "min": 0},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Tool Execution Time",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "tool_execution_time_seconds",
+            "legendFormat": "{{tool}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Time"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Most Used Tools",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "tool_usage",
+            "legendFormat": "{{tool}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Tool Performance Summary",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "tool_usage",
+            "format": "table",
+            "refId": "A"
+          },
+          {
+            "expr": "tool_success_rate",
+            "format": "table",
+            "refId": "B"
+          },
+          {
+            "expr": "tool_execution_time_seconds",
+            "format": "table",
+            "refId": "C"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "merge",
+            "options": {}
+          }
+        ]
+      }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}

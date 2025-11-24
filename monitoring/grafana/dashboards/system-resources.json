@@ -1,0 +1,150 @@
+{
+  "dashboard": {
+    "title": "System Resources Dashboard",
+    "tags": ["system", "resources"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "CPU Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "cpu_usage_percent",
+            "legendFormat": "CPU %",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "Usage", "max": 100, "min": 0},
+          {"format": "short"}
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {"params": [80], "type": "gt"},
+              "operator": {"type": "and"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "frequency": "1m",
+          "handler": 1,
+          "name": "High CPU Usage",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 2,
+        "title": "Memory Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "memory_usage_percent",
+            "legendFormat": "Memory %",
+            "refId": "A"
+          },
+          {
+            "expr": "memory_used_mb",
+            "legendFormat": "Memory MB",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "Usage %"},
+          {"format": "decmbytes", "label": "MB"}
+        ]
+      },
+      {
+        "id": 3,
+        "title": "GPU Memory Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "gpu_memory_allocated_mb",
+            "legendFormat": "GPU {{device}} Memory MB",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "decmbytes", "label": "Memory"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Current CPU %",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "cpu_usage_percent",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 70, "color": "yellow"},
+                {"value": 85, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Current Memory %",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 8, "y": 16},
+        "targets": [
+          {
+            "expr": "memory_usage_percent",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 75, "color": "yellow"},
+                {"value": 90, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Memory Used (MB)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 8, "x": 16, "y": 16},
+        "targets": [
+          {
+            "expr": "memory_used_mb",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "decmbytes"
+          }
+        }
+      }
+    ],
+    "refresh": "10s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}

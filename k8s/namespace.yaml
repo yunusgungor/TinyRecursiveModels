@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trendyol-gift
+  labels:
+    name: trendyol-gift
+    environment: production

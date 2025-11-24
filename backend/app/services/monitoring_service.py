@@ -206,6 +206,51 @@ class MonitoringService:
             logger.error(f"Trendyol API health check failed: {e}")
             return "unhealthy"
     
+    def get_resource_metrics(self) -> Dict[str, Any]:
+        """Get system resource usage metrics"""
+        # CPU usage
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        
+        # Memory usage
+        memory = psutil.virtual_memory()
+        memory_info = {
+            "total_mb": round(memory.total / (1024 * 1024), 2),
+            "used_mb": round(memory.used / (1024 * 1024), 2),
+            "available_mb": round(memory.available / (1024 * 1024), 2),
+            "percent": memory.percent
+        }
+        
+        # GPU usage (if available)
+        gpu_info = None
+        if TORCH_AVAILABLE and torch.cuda.is_available():
+            try:
+                gpu_devices = []
+                for i in range(torch.cuda.device_count()):
+                    gpu_devices.append({
+                        "device_id": i,
+                        "name": torch.cuda.get_device_name(i),
+                        "memory_allocated_mb": round(
+                            torch.cuda.memory_allocated(i) / (1024 * 1024), 2
+                        ),
+                        "memory_reserved_mb": round(
+                            torch.cuda.memory_reserved(i) / (1024 * 1024), 2
+                        )
+                    })
+                gpu_info = {"devices": gpu_devices}
+            except Exception as e:
+                logger.error(f"Failed to get GPU metrics: {e}")
+        
+        return {
+            "cpu_percent": cpu_percent,
+            "memory": memory_info,
+            "gpu": gpu_info,
+            "timestamp": datetime.utcnow()
+        }
+    
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics"""
+        return self.metrics_collector.get_performance_metrics()
+    
     def get_health_status(self) -> Dict[str, Any]:
         """Get overall health status"""
         model_status = self.get_model_status()

@@ -9,11 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.v1 import health, recommendations, tools
+from app.api.v1 import health, recommendations, tools, metrics
 from app.core.config import settings
 from app.core.exceptions import BaseAPIException
 from app.core.logging import logger
 from app.middleware.error_handler import error_handler_middleware
+from app.middleware.rate_limiter import rate_limit_middleware
+from app.middleware.session import session_middleware
+from app.middleware.https_redirect import https_redirect_middleware
 from app.models.schemas import ErrorResponse
 from datetime import datetime
 import uuid
@@ -25,6 +28,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     logger.info("Starting Trendyol Gift Recommendation API")
     logger.info(f"Environment: {'Development' if settings.DEBUG else 'Production'}")
+    
+    # Setup tracing
+    try:
+        from app.core.tracing import setup_tracing
+        setup_tracing(app)
+    except ImportError:
+        logger.warning("OpenTelemetry not installed, tracing disabled")
+    except Exception as e:
+        logger.error(f"Failed to setup tracing: {e}")
     
     yield
     
@@ -60,6 +72,11 @@ def create_application() -> FastAPI:
             TrustedHostMiddleware,
             allowed_hosts=["*"]  # Configure properly in production
         )
+    
+    # Security middlewares
+    app.middleware("http")(https_redirect_middleware)
+    app.middleware("http")(rate_limit_middleware)
+    app.middleware("http")(session_middleware)
     
     # Error handling middleware
     app.middleware("http")(error_handler_middleware)
@@ -142,6 +159,12 @@ def create_application() -> FastAPI:
         prefix=settings.API_V1_PREFIX,
         tags=["tools"]
     )
+    # Metrics endpoints are in health router
+    # app.include_router(
+    #     metrics.router,
+    #     prefix=settings.API_V1_PREFIX,
+    #     tags=["metrics"]
+    # )
     
     @app.get("/")
     async def root() -> dict:

@@ -1,0 +1,578 @@
+openapi: 3.0.3
+info:
+  title: Trendyol Gift Recommendation API
+  description: |
+    Trendyol Gift Recommendation API, kullanıcı profillerine göre kişiselleştirilmiş 
+    hediye önerileri sunan bir REST API'dir. API, eğitilmiş TinyRecursiveModels (TRM) 
+    modelini kullanarak gerçek zamanlı öneriler üretir ve Trendyol'dan ürün verilerini çeker.
+    
+    ## Features
+    - 🎯 AI-powered personalized recommendations
+    - 💰 Budget-aware suggestions
+    - ⭐ Review analysis
+    - 📊 Price comparison
+    - 🔄 Caching for fast responses
+    
+    ## Rate Limiting
+    - 10 requests per minute per IP
+    - Headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
+    
+    ## Authentication
+    Currently public API. JWT authentication will be added in future versions.
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Development server
+  - url: https://staging-api.example.com
+    description: Staging server
+  - url: https://api.example.com
+    description: Production server
+
+tags:
+  - name: recommendations
+    description: Gift recommendation operations
+  - name: health
+    description: Health check and monitoring
+  - name: tools
+    description: Tool statistics and information
+  - name: metrics
+    description: Prometheus metrics
+
+paths:
+  /api/v1/recommendations:
+    post:
+      tags:
+        - recommendations
+      summary: Get gift recommendations
+      description: |
+        Generate personalized gift recommendations based on user profile.
+        
+        The endpoint:
+        1. Validates user profile
+        2. Checks cache for existing recommendations
+        3. Fetches available gifts from Trendyol
+        4. Runs model inference
+        5. Executes analysis tools
+        6. Returns ranked recommendations
+      operationId: getRecommendations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendationRequest'
+            examples:
+              basic:
+                summary: Basic recommendation request
+                value:
+                  user_profile:
+                    age: 35
+                    hobbies: ["cooking", "gardening"]
+                    relationship: "mother"
+                    budget: 500.0
+                    occasion: "birthday"
+                    personality_traits: ["practical"]
+                  max_recommendations: 5
+                  use_cache: true
+              detailed:
+                summary: Detailed request with multiple traits
+                value:
+                  user_profile:
+                    age: 28
+                    hobbies: ["technology", "gaming", "photography"]
+                    relationship: "friend"
+                    budget: 1500.0
+                    occasion: "graduation"
+                    personality_traits: ["tech-savvy", "creative", "minimalist"]
+                  max_recommendations: 10
+                  use_cache: false
+      responses:
+        '200':
+          description: Successful response with recommendations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendationResponse'
+              examples:
+                success:
+                  summary: Successful recommendation
+                  value:
+                    recommendations:
+                      - gift:
+                          id: "12345"
+                          name: "Premium Coffee Set"
+                          category: "Kitchen & Dining"
+                          price: 299.99
+                          rating: 4.5
+                          image_url: "https://cdn.trendyol.com/example.jpg"
+                          trendyol_url: "https://www.trendyol.com/product/12345"
+                          description: "High-quality coffee set"
+                          tags: ["coffee", "kitchen", "gift"]
+                          age_suitability: [25, 65]
+                          occasion_fit: ["birthday", "anniversary"]
+                          in_stock: true
+                        confidence_score: 0.92
+                        reasoning:
+                          - "Matches user's cooking hobby"
+                          - "Within budget range"
+                          - "High rating and positive reviews"
+                        tool_insights:
+                          price_comparison:
+                            best_price: 299.99
+                            average_price: 350.0
+                            savings_percentage: 14.3
+                        rank: 1
+                    tool_results: {}
+                    inference_time: 1.23
+                    cache_hit: false
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: "VALIDATION_ERROR"
+                message: "Geçersiz değer: age"
+                details:
+                  field: "age"
+                  validation_errors:
+                    - loc: ["body", "user_profile", "age"]
+                      msg: "ensure this value is greater than or equal to 18"
+                      type: "value_error.number.not_ge"
+                timestamp: "2024-01-15T10:30:00Z"
+                request_id: "abc-123"
+        '503':
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: "SERVICE_UNAVAILABLE"
+                message: "Model şu anda kullanılamıyor"
+                timestamp: "2024-01-15T10:30:00Z"
+                request_id: "abc-123"
+
+  /api/v1/health:
+    get:
+      tags:
+        - health
+      summary: Health check
+      description: Check system health status including model, API, and cache
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "healthy"
+                model_loaded: true
+                trendyol_api_status: "operational"
+                cache_status: "connected"
+                timestamp: "2024-01-15T10:30:00Z"
+
+  /api/v1/metrics:
+    get:
+      tags:
+        - metrics
+      summary: Get Prometheus metrics
+      description: Returns metrics in Prometheus exposition format
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                # HELP recommendation_requests_total Total recommendation requests
+                # TYPE recommendation_requests_total counter
+                recommendation_requests_total 1234
+                
+                # HELP inference_duration_seconds Model inference duration
+                # TYPE inference_duration_seconds histogram
+                inference_duration_seconds_bucket{le="0.5"} 100
+                inference_duration_seconds_bucket{le="1.0"} 250
+
+  /api/v1/resources:
+    get:
+      tags:
+        - health
+      summary: Get system resources
+      description: Returns CPU, memory, and GPU usage
+      operationId: getResources
+      responses:
+        '200':
+          description: Resource metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cpu_percent:
+                    type: number
+                    format: float
+                  memory_percent:
+                    type: number
+                    format: float
+                  memory_used_mb:
+                    type: number
+                    format: float
+                  memory_total_mb:
+                    type: number
+                    format: float
+                  gpu_available:
+                    type: boolean
+                  gpu_memory_used_mb:
+                    type: number
+                    format: float
+                  gpu_memory_total_mb:
+                    type: number
+                    format: float
+              example:
+                cpu_percent: 45.2
+                memory_percent: 62.8
+                memory_used_mb: 2048
+                memory_total_mb: 8192
+                gpu_available: true
+                gpu_memory_used_mb: 1024
+                gpu_memory_total_mb: 4096
+
+  /api/v1/tools/stats:
+    get:
+      tags:
+        - tools
+      summary: Get tool statistics
+      description: Returns usage statistics for all analysis tools
+      operationId: getToolStats
+      responses:
+        '200':
+          description: Tool statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolStatsResponse'
+              example:
+                tool_usage:
+                  price_comparison: 1234
+                  review_analysis: 1150
+                  trend_analysis: 980
+                success_rates:
+                  price_comparison: 0.95
+                  review_analysis: 0.92
+                  trend_analysis: 0.88
+                average_execution_times:
+                  price_comparison: 0.45
+                  review_analysis: 0.82
+                  trend_analysis: 0.65
+
+components:
+  schemas:
+    UserProfile:
+      type: object
+      required:
+        - age
+        - hobbies
+        - relationship
+        - budget
+        - occasion
+      properties:
+        age:
+          type: integer
+          minimum: 18
+          maximum: 100
+          description: Age of the gift recipient
+          example: 35
+        hobbies:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 10
+          description: List of hobbies
+          example: ["cooking", "gardening"]
+        relationship:
+          type: string
+          description: Relationship to the recipient
+          example: "mother"
+        budget:
+          type: number
+          format: float
+          minimum: 0
+          exclusiveMinimum: true
+          description: Budget in Turkish Lira
+          example: 500.0
+        occasion:
+          type: string
+          description: Special occasion
+          example: "birthday"
+        personality_traits:
+          type: array
+          items:
+            type: string
+          maxItems: 5
+          description: Personality traits
+          example: ["practical", "eco-friendly"]
+
+    GiftItem:
+      type: object
+      required:
+        - id
+        - name
+        - category
+        - price
+        - rating
+        - image_url
+        - trendyol_url
+      properties:
+        id:
+          type: string
+          description: Unique product identifier
+          example: "12345"
+        name:
+          type: string
+          description: Product name
+          example: "Premium Coffee Set"
+        category:
+          type: string
+          description: Product category
+          example: "Kitchen & Dining"
+        price:
+          type: number
+          format: float
+          minimum: 0
+          description: Product price in TL
+          example: 299.99
+        rating:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 5
+          description: Product rating
+          example: 4.5
+        image_url:
+          type: string
+          format: uri
+          description: Product image URL
+          example: "https://cdn.trendyol.com/example.jpg"
+        trendyol_url:
+          type: string
+          format: uri
+          description: Trendyol product page URL
+          example: "https://www.trendyol.com/product/12345"
+        description:
+          type: string
+          description: Product description
+          example: "High-quality coffee set"
+        tags:
+          type: array
+          items:
+            type: string
+          description: Product tags
+          example: ["coffee", "kitchen", "gift"]
+        age_suitability:
+          type: array
+          items:
+            type: integer
+          minItems: 2
+          maxItems: 2
+          description: Age range suitability
+          example: [25, 65]
+        occasion_fit:
+          type: array
+          items:
+            type: string
+          description: Suitable occasions
+          example: ["birthday", "anniversary"]
+        in_stock:
+          type: boolean
+          description: Stock availability
+          example: true
+
+    GiftRecommendation:
+      type: object
+      required:
+        - gift
+        - confidence_score
+        - reasoning
+        - rank
+      properties:
+        gift:
+          $ref: '#/components/schemas/GiftItem'
+        confidence_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Confidence score
+          example: 0.92
+        reasoning:
+          type: array
+          items:
+            type: string
+          description: Reasoning for recommendation
+          example: ["Matches user's cooking hobby", "Within budget range"]
+        tool_insights:
+          type: object
+          description: Insights from analysis tools
+          additionalProperties: true
+        rank:
+          type: integer
+          minimum: 1
+          description: Recommendation rank
+          example: 1
+
+    RecommendationRequest:
+      type: object
+      required:
+        - user_profile
+      properties:
+        user_profile:
+          $ref: '#/components/schemas/UserProfile'
+        max_recommendations:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: Maximum number of recommendations
+          example: 5
+        use_cache:
+          type: boolean
+          default: true
+          description: Whether to use cache
+          example: true
+
+    RecommendationResponse:
+      type: object
+      required:
+        - recommendations
+        - inference_time
+        - cache_hit
+      properties:
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/GiftRecommendation'
+        tool_results:
+          type: object
+          description: Aggregated tool results
+          additionalProperties: true
+        inference_time:
+          type: number
+          format: float
+          description: Inference time in seconds
+          example: 1.23
+        cache_hit:
+          type: boolean
+          description: Whether result was from cache
+          example: false
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - model_loaded
+        - trendyol_api_status
+        - cache_status
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall system status
+          example: "healthy"
+        model_loaded:
+          type: boolean
+          description: Whether model is loaded
+          example: true
+        trendyol_api_status:
+          type: string
+          enum: [operational, degraded, down]
+          description: Trendyol API status
+          example: "operational"
+        cache_status:
+          type: string
+          enum: [connected, disconnected]
+          description: Cache connection status
+          example: "connected"
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of health check
+          example: "2024-01-15T10:30:00Z"
+
+    ToolStatsResponse:
+      type: object
+      required:
+        - tool_usage
+        - success_rates
+        - average_execution_times
+      properties:
+        tool_usage:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Number of times each tool was used
+        success_rates:
+          type: object
+          additionalProperties:
+            type: number
+            format: float
+          description: Success rate for each tool (0-1)
+        average_execution_times:
+          type: object
+          additionalProperties:
+            type: number
+            format: float
+          description: Average execution time in seconds
+
+    ErrorResponse:
+      type: object
+      required:
+        - error_code
+        - message
+        - timestamp
+        - request_id
+      properties:
+        error_code:
+          type: string
+          description: Error code
+          example: "VALIDATION_ERROR"
+        message:
+          type: string
+          description: Error message
+          example: "Geçersiz değer: age"
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+          description: Error timestamp
+          example: "2024-01-15T10:30:00Z"
+        request_id:
+          type: string
+          description: Unique request identifier
+          example: "abc-123"
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT authentication (to be implemented)
+
+security: []

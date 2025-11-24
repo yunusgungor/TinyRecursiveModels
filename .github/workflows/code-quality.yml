@@ -1,0 +1,154 @@
+name: Code Quality
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for better analysis
+          
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=trendyol-gift-recommendation
+            -Dsonar.organization=your-org
+            -Dsonar.sources=backend/app,frontend/src
+            -Dsonar.tests=backend/tests,frontend/src/test
+            -Dsonar.python.coverage.reportPaths=backend/coverage.xml
+            -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info
+
+  code-review:
+    name: Automated Code Review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Run Reviewdog
+        uses: reviewdog/action-setup@v1
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install Python linters
+        run: |
+          pip install pylint flake8
+          
+      - name: Run Pylint with Reviewdog
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd backend
+          pylint app --output-format=parseable | reviewdog -f=pylint -reporter=github-pr-review
+          
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+          
+      - name: Run ESLint with Reviewdog
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd frontend
+          npm run lint -- --format=json | reviewdog -f=eslint -reporter=github-pr-review
+
+  complexity-check:
+    name: Code Complexity Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install radon
+        run: pip install radon
+        
+      - name: Check cyclomatic complexity
+        run: |
+          cd backend
+          radon cc app -a -nb
+          
+      - name: Check maintainability index
+        run: |
+          cd backend
+          radon mi app -nb
+          
+      - name: Fail on high complexity
+        run: |
+          cd backend
+          radon cc app -nc 10
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v3
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-3.0, AGPL-3.0
+
+  pr-size-check:
+    name: PR Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Check PR size
+        run: |
+          FILES_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
+          LINES_CHANGED=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1 | awk '{print $4+$6}')
+          
+          echo "Files changed: $FILES_CHANGED"
+          echo "Lines changed: $LINES_CHANGED"
+          
+          if [ $FILES_CHANGED -gt 50 ]; then
+            echo "::warning::PR changes more than 50 files. Consider breaking it into smaller PRs."
+          fi
+          
+          if [ $LINES_CHANGED -gt 1000 ]; then
+            echo "::warning::PR changes more than 1000 lines. Consider breaking it into smaller PRs."
+          fi
+
+  commit-message-check:
+    name: Commit Message Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Check commit messages
+        run: |
+          # Check if commit messages follow conventional commits
+          git log --format=%s origin/${{ github.base_ref }}..HEAD | while read msg; do
+            if ! echo "$msg" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?: .+'; then
+              echo "::warning::Commit message does not follow conventional commits: $msg"
+            fi
+          done

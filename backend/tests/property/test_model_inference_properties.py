@@ -343,7 +343,7 @@ class TestDeviceSelection:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture]
     )
-    def test_device_selection_property(self, device_config, cuda_available):
+    def test_device_selection_property(self, device_config, cuda_available, monkeypatch):
         """
         Property test: Device selection logic
         
@@ -356,10 +356,11 @@ class TestDeviceSelection:
         from unittest.mock import patch
         from app.services.model_inference import ModelInferenceService
         
-        # Mock CUDA availability and settings using context managers
-        with patch('torch.cuda.is_available', return_value=cuda_available), \
-             patch('app.core.config.settings.MODEL_DEVICE', device_config):
-            
+        # Patch settings before creating service
+        monkeypatch.setattr("app.core.config.settings.MODEL_DEVICE", device_config)
+        
+        # Mock CUDA availability
+        with patch('torch.cuda.is_available', return_value=cuda_available):
             # Create service
             service = ModelInferenceService()
             
