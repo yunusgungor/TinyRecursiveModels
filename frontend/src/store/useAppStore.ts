@@ -34,6 +34,13 @@ interface AppState {
   addSearchHistory: (profile: UserProfile) => void;
   removeSearchHistory: (id: string) => void;
   clearSearchHistory: () => void;
+  
+  // Comparison Mode
+  selectedGiftsForComparison: string[];
+  isComparisonMode: boolean;
+  toggleGiftSelection: (giftId: string) => void;
+  clearGiftSelection: () => void;
+  setComparisonMode: (enabled: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -90,6 +97,29 @@ export const useAppStore = create<AppState>()(
         clearSearchHistory: () => {
           clearSearchHistoryFromStorage();
           set({ searchHistory: [] });
+        },
+        
+        // Comparison Mode
+        selectedGiftsForComparison: [],
+        isComparisonMode: false,
+        toggleGiftSelection: (giftId) => {
+          set((state) => {
+            const isSelected = state.selectedGiftsForComparison.includes(giftId);
+            return {
+              selectedGiftsForComparison: isSelected
+                ? state.selectedGiftsForComparison.filter((id) => id !== giftId)
+                : [...state.selectedGiftsForComparison, giftId],
+            };
+          });
+        },
+        clearGiftSelection: () => {
+          set({ selectedGiftsForComparison: [], isComparisonMode: false });
+        },
+        setComparisonMode: (enabled) => {
+          set({ isComparisonMode: enabled });
+          if (!enabled) {
+            set({ selectedGiftsForComparison: [] });
+          }
         },
       }),
       {

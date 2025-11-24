@@ -62,7 +62,18 @@ export default defineConfig({
       exclude: [
         'node_modules/',
         'src/test/',
+        '**/*.stories.tsx',
+        '**/*.test.tsx',
+        '**/*.spec.tsx',
       ],
     },
+    // Property-based testing configuration
+    testTimeout: 30000, // Increased timeout for property tests (100+ iterations)
+    hookTimeout: 30000,
+    // Separate property tests from unit tests
+    include: [
+      'src/**/*.{test,spec}.{ts,tsx}',
+      'src/**/*.property.{test,spec}.{ts,tsx}',
+    ],
   },
 })
