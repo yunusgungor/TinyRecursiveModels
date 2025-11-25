@@ -3,6 +3,39 @@ import { AttentionWeightsChart } from './AttentionWeightsChart';
 import { useState } from 'react';
 import { ChartType } from '@/types/reasoning';
 
+/**
+ * AttentionWeightsChart visualizes model attention weights for user and gift features.
+ * 
+ * ## Chart Types
+ * - **Bar Chart**: Best for comparing individual feature weights
+ * - **Radar Chart**: Best for seeing overall distribution pattern
+ * 
+ * ## Features
+ * - Toggle between bar and radar chart
+ * - Weights displayed as percentages
+ * - Hover tooltips with full values
+ * - Separate charts for user and gift features
+ * - Responsive layout
+ * 
+ * ## User Features
+ * - Hobbies
+ * - Budget
+ * - Age
+ * - Occasion
+ * 
+ * ## Gift Features
+ * - Category
+ * - Price
+ * - Rating
+ * 
+ * ## Accessibility
+ * - ARIA labels for charts
+ * - Keyboard navigable toggle
+ * - Alt text for chart elements
+ * 
+ * ## Usage
+ * Used in ReasoningPanel to show attention weights reasoning.
+ */
 const meta = {
   title: 'Components/AttentionWeightsChart',
   component: AttentionWeightsChart,
@@ -10,6 +43,20 @@ const meta = {
     layout: 'padded',
   },
   tags: ['autodocs'],
+  argTypes: {
+    attentionWeights: {
+      description: 'Attention weights for user and gift features',
+    },
+    chartType: {
+      description: 'Chart visualization type',
+      control: { type: 'radio' },
+      options: ['bar', 'radar'],
+    },
+    onChartTypeChange: {
+      description: 'Callback when chart type is changed',
+      action: 'chart type changed',
+    },
+  },
 } satisfies Meta<typeof AttentionWeightsChart>;
 
 export default meta;
@@ -28,6 +75,10 @@ const AttentionWeightsChartWithState = (args: any) => {
   );
 };
 
+/**
+ * Default attention weights with bar chart
+ * Shows typical weight distribution
+ */
 export const Default: Story = {
   render: (args) => <AttentionWeightsChartWithState {...args} />,
   args: {
@@ -48,6 +99,10 @@ export const Default: Story = {
   },
 };
 
+/**
+ * Bar chart visualization
+ * Best for comparing individual feature weights
+ */
 export const BarChart: Story = {
   render: (args) => <AttentionWeightsChartWithState {...args} />,
   args: {
@@ -68,6 +123,10 @@ export const BarChart: Story = {
   },
 };
 
+/**
+ * Radar chart visualization
+ * Best for seeing overall distribution pattern
+ */
 export const RadarChart: Story = {
   render: (args) => <AttentionWeightsChartWithState {...args} />,
   args: {
@@ -88,6 +147,10 @@ export const RadarChart: Story = {
   },
 };
 
+/**
+ * High hobby weight scenario
+ * Model heavily prioritizes user hobbies
+ */
 export const HighHobbyWeight: Story = {
   render: (args) => <AttentionWeightsChartWithState {...args} />,
   args: {
@@ -108,6 +171,10 @@ export const HighHobbyWeight: Story = {
   },
 };
 
+/**
+ * Balanced weights across all features
+ * Model considers all features equally
+ */
 export const BalancedWeights: Story = {
   render: (args) => <AttentionWeightsChartWithState {...args} />,
   args: {
@@ -128,6 +195,10 @@ export const BalancedWeights: Story = {
   },
 };
 
+/**
+ * Minimal weights on most features
+ * Model heavily focuses on specific features (occasion, rating)
+ */
 export const MinimalWeights: Story = {
   render: (args) => <AttentionWeightsChartWithState {...args} />,
   args: {

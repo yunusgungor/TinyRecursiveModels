@@ -89,3 +89,5 @@ dump.rdb
 
 backend/.hypothesis/
 .hypothesis/
+playwright-report/
+test-results/

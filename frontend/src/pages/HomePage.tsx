@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { UserProfileForm } from '@/components/UserProfileForm';
 import { RecommendationCard } from '@/components/RecommendationCard';
 import { ToolResultsModal } from '@/components/ToolResultsModal';
@@ -16,27 +16,37 @@ export function HomePage() {
   const [toolResults, setToolResults] = useState<ToolResults | undefined>(undefined);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('search');
+  const [data, setData] = useState<{ recommendations: GiftRecommendation[]; inferenceTime: number; cacheHit: boolean } | null>(null);
+  const [isPending, setIsPending] = useState(false);
+  const [isError, setIsError] = useState(false);
+  const [error, setError] = useState<any>(null);
 
-  const { mutate: getRecommendations, data, isPending, isError, error } = useRecommendations();
   const { addSearchHistory } = useAppStore();
 
   const handleSubmit = async (profile: UserProfile) => {
     // Add to search history
     addSearchHistory(profile);
     
-    getRecommendations(
-      {
-        userProfile: profile,
+    setIsPending(true);
+    setIsError(false);
+    setError(null);
+    
+    try {
+      // Import the API client
+      const { recommendationsApi } = await import('@/lib/api/recommendations');
+      const response = await recommendationsApi.getRecommendations(profile, {
         maxRecommendations: 5,
         useCache: true,
-      },
-      {
-        onSuccess: (response) => {
-          // Store tool results for modal display
-          setToolResults(response.toolResults as ToolResults);
-        },
-      }
-    );
+      });
+      
+      setData(response);
+      setToolResults(response.toolResults as ToolResults);
+      setIsPending(false);
+    } catch (err) {
+      setError(err);
+      setIsError(true);
+      setIsPending(false);
+    }
   };
 
   const handleHistoryProfileSelect = (profile: UserProfile) => {

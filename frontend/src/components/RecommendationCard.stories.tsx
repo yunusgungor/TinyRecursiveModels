@@ -17,116 +17,140 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-const mockGift = {
-  id: '12345',
-  name: 'Premium Coffee Set',
-  category: 'Kitchen & Dining',
-  price: 299.99,
-  rating: 4.5,
-  image_url: 'https://cdn.dummyimage.com/400x400/cccccc/000000.png&text=Coffee+Set',
-  trendyol_url: 'https://www.trendyol.com/product/12345',
-  description: 'High-quality coffee set with grinder and accessories',
-  tags: ['coffee', 'kitchen', 'gift'],
-  age_suitability: [25, 65] as [number, number],
-  occasion_fit: ['birthday', 'anniversary'],
-  in_stock: true,
+const mockRecommendation = {
+  gift: {
+    id: '12345',
+    name: 'Premium Coffee Set',
+    category: 'Kitchen & Dining',
+    price: 299.99,
+    rating: 4.5,
+    imageUrl: 'https://cdn.dummyimage.com/400x400/cccccc/000000.png&text=Coffee+Set',
+    trendyolUrl: 'https://www.trendyol.com/product/12345',
+    description: 'High-quality coffee set with grinder and accessories',
+    tags: ['coffee', 'kitchen', 'gift'],
+    ageSuitability: [25, 65] as [number, number],
+    occasionFit: ['birthday', 'anniversary'],
+    inStock: true,
+  },
+  confidenceScore: 0.92,
+  reasoning: [
+    'Matches user\'s cooking hobby',
+    'Within budget range',
+    'High rating and positive reviews',
+    'Popular in the category',
+  ],
+  toolInsights: {
+    priceMatch: 0.9,
+    reviewScore: 0.85,
+    trendScore: 0.88,
+  },
+  rank: 1,
 };
 
 const mockToolResults = {
   priceComparison: {
-    best_price: 299.99,
-    average_price: 350.0,
-    price_range: '250-400 TL',
-    savings_percentage: 14.3,
-    checked_platforms: ['Trendyol', 'Hepsiburada', 'N11'],
+    bestPrice: 299.99,
+    averagePrice: 350.0,
+    priceRange: '250-400 TL',
+    savingsPercentage: 14.3,
+    checkedPlatforms: ['Trendyol', 'Hepsiburada', 'N11'],
   },
   reviewAnalysis: {
-    average_rating: 4.5,
-    total_reviews: 234,
-    sentiment_score: 0.85,
-    key_positives: ['quality', 'design', 'value for money'],
-    key_negatives: ['shipping time'],
-    recommendation_confidence: 0.92,
+    averageRating: 4.5,
+    totalReviews: 234,
+    sentimentScore: 0.85,
+    keyPositives: ['quality', 'design', 'value for money'],
+    keyNegatives: ['shipping time'],
+    recommendationConfidence: 0.92,
   },
   trendAnalysis: {
-    trend_direction: 'rising',
-    popularity_score: 0.88,
-    growth_rate: 15.5,
-    trending_items: ['coffee makers', 'espresso machines'],
+    trendDirection: 'rising',
+    popularityScore: 0.88,
+    growthRate: 15.5,
+    trendingItems: ['coffee makers', 'espresso machines'],
   },
 };
 
 export const Default: Story = {
   args: {
-    gift: mockGift,
+    recommendation: mockRecommendation,
     toolResults: mockToolResults,
-    confidenceScore: 0.92,
-    reasoning: [
-      'Matches user\'s cooking hobby',
-      'Within budget range',
-      'High rating and positive reviews',
-      'Popular in the category',
-    ],
-    rank: 1,
   },
 };
 
 export const HighConfidence: Story = {
   args: {
-    ...Default.args,
-    confidenceScore: 0.95,
+    recommendation: {
+      ...mockRecommendation,
+      confidenceScore: 0.95,
+    },
+    toolResults: mockToolResults,
   },
 };
 
 export const MediumConfidence: Story = {
   args: {
-    ...Default.args,
-    confidenceScore: 0.65,
+    recommendation: {
+      ...mockRecommendation,
+      confidenceScore: 0.65,
+    },
+    toolResults: mockToolResults,
   },
 };
 
 export const LowConfidence: Story = {
   args: {
-    ...Default.args,
-    confidenceScore: 0.35,
+    recommendation: {
+      ...mockRecommendation,
+      confidenceScore: 0.35,
+    },
+    toolResults: mockToolResults,
   },
 };
 
 export const OutOfStock: Story = {
   args: {
-    ...Default.args,
-    gift: {
-      ...mockGift,
-      in_stock: false,
+    recommendation: {
+      ...mockRecommendation,
+      gift: {
+        ...mockRecommendation.gift,
+        inStock: false,
+      },
     },
+    toolResults: mockToolResults,
   },
 };
 
 export const ExpensiveItem: Story = {
   args: {
-    ...Default.args,
-    gift: {
-      ...mockGift,
-      name: 'Professional Espresso Machine',
-      price: 2499.99,
+    recommendation: {
+      ...mockRecommendation,
+      gift: {
+        ...mockRecommendation.gift,
+        name: 'Professional Espresso Machine',
+        price: 2499.99,
+      },
     },
+    toolResults: mockToolResults,
   },
 };
 
 export const LowRating: Story = {
   args: {
-    ...Default.args,
-    gift: {
-      ...mockGift,
-      rating: 2.5,
+    recommendation: {
+      ...mockRecommendation,
+      gift: {
+        ...mockRecommendation.gift,
+        rating: 2.5,
+      },
     },
     toolResults: {
       ...mockToolResults,
       reviewAnalysis: {
         ...mockToolResults.reviewAnalysis!,
-        average_rating: 2.5,
-        sentiment_score: 0.45,
-        key_negatives: ['poor quality', 'breaks easily', 'not worth the price'],
+        averageRating: 2.5,
+        sentimentScore: 0.45,
+        keyNegatives: ['poor quality', 'breaks easily', 'not worth the price'],
       },
     },
   },
@@ -134,7 +158,7 @@ export const LowRating: Story = {
 
 export const MinimalToolResults: Story = {
   args: {
-    ...Default.args,
+    recommendation: mockRecommendation,
     toolResults: {},
   },
 };

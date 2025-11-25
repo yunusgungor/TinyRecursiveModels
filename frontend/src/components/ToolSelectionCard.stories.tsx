@@ -2,6 +2,28 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { ToolSelectionCard } from './ToolSelectionCard';
 import { ToolSelectionReasoning } from '@/types/reasoning';
 
+/**
+ * ToolSelectionCard displays which tools were selected by the model and why.
+ * 
+ * ## Visual Indicators
+ * - **Green + Checkmark**: Selected tool
+ * - **Gray**: Unselected tool
+ * - **Yellow tooltip**: Low confidence warning
+ * 
+ * ## Features
+ * - Shows selection status, confidence score, and priority
+ * - Hover tooltips with selection reasons and factors
+ * - Low confidence warnings
+ * - Responsive layout
+ * 
+ * ## Accessibility
+ * - ARIA labels for screen readers
+ * - Keyboard navigable tooltips
+ * - Semantic HTML structure
+ * 
+ * ## Usage
+ * Used in the ReasoningPanel to show tool selection reasoning.
+ */
 const meta = {
   title: 'Components/ToolSelectionCard',
   component: ToolSelectionCard,
@@ -9,6 +31,11 @@ const meta = {
     layout: 'centered',
   },
   tags: ['autodocs'],
+  argTypes: {
+    toolSelection: {
+      description: 'Array of tool selection reasoning data',
+    },
+  },
 } satisfies Meta<typeof ToolSelectionCard>;
 
 export default meta;
@@ -66,12 +93,18 @@ const sampleToolSelection: ToolSelectionReasoning[] = [
   },
 ];
 
+/**
+ * Default tool selection with mixed selected/unselected tools
+ */
 export const Default: Story = {
   args: {
     toolSelection: sampleToolSelection,
   },
 };
 
+/**
+ * All tools selected with high confidence
+ */
 export const AllSelected: Story = {
   args: {
     toolSelection: sampleToolSelection.map((tool) => ({
@@ -82,6 +115,9 @@ export const AllSelected: Story = {
   },
 };
 
+/**
+ * No tools selected (all gray)
+ */
 export const AllUnselected: Story = {
   args: {
     toolSelection: sampleToolSelection.map((tool) => ({
@@ -92,6 +128,10 @@ export const AllUnselected: Story = {
   },
 };
 
+/**
+ * Tools with low confidence scores (<0.5)
+ * Shows warning tooltips for low confidence
+ */
 export const LowConfidence: Story = {
   args: {
     toolSelection: [
@@ -118,6 +158,10 @@ export const LowConfidence: Story = {
   },
 };
 
+/**
+ * Tools without factor details
+ * Tests graceful handling of missing factors
+ */
 export const NoFactors: Story = {
   args: {
     toolSelection: [
@@ -141,12 +185,18 @@ export const NoFactors: Story = {
   },
 };
 
+/**
+ * Empty state - no tools available
+ */
 export const Empty: Story = {
   args: {
     toolSelection: [],
   },
 };
 
+/**
+ * Single tool with very high confidence
+ */
 export const SingleTool: Story = {
   args: {
     toolSelection: [

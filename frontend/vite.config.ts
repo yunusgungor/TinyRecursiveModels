@@ -23,17 +23,44 @@ export default defineConfig({
     // Code splitting optimization
     rollupOptions: {
       output: {
-        manualChunks: {
+        manualChunks: (id) => {
           // Vendor chunks
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'query-vendor': ['@tanstack/react-query'],
-          'chart-vendor': ['recharts'],
-          // Component chunks
-          'components': [
-            './src/components/UserProfileForm.tsx',
-            './src/components/RecommendationCard.tsx',
-            './src/components/ToolResultsModal.tsx',
-          ],
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+              return 'react-vendor';
+            }
+            if (id.includes('@tanstack/react-query')) {
+              return 'query-vendor';
+            }
+            if (id.includes('recharts')) {
+              return 'chart-vendor';
+            }
+            if (id.includes('@radix-ui')) {
+              return 'ui-vendor';
+            }
+            if (id.includes('jspdf')) {
+              return 'pdf-vendor';
+            }
+            return 'vendor';
+          }
+          
+          // Reasoning feature chunks (lazy loaded)
+          if (id.includes('/components/ReasoningPanel')) {
+            return 'reasoning-panel';
+          }
+          if (id.includes('/components/AttentionWeightsChart') || 
+              id.includes('/components/CategoryMatchingChart')) {
+            return 'reasoning-charts';
+          }
+          if (id.includes('/components/ToolSelectionCard') || 
+              id.includes('/components/ThinkingStepsTimeline')) {
+            return 'reasoning-components';
+          }
+          
+          // Core components
+          if (id.includes('/components/') && !id.includes('reasoning')) {
+            return 'components';
+          }
         },
       },
     },
@@ -45,8 +72,18 @@ export default defineConfig({
       compress: {
         drop_console: true, // Remove console.log in production
         drop_debugger: true,
+        pure_funcs: ['console.log', 'console.info'], // Remove specific console methods
+      },
+      mangle: {
+        safari10: true, // Fix Safari 10 issues
       },
     },
+    // Source maps for production debugging (optional)
+    sourcemap: false,
+    // Optimize CSS
+    cssCodeSplit: true,
+    // Optimize assets
+    assetsInlineLimit: 4096, // Inline assets smaller than 4kb
   },
   // Performance optimizations
   optimizeDeps: {
@@ -74,6 +111,15 @@ export default defineConfig({
     include: [
       'src/**/*.{test,spec}.{ts,tsx}',
       'src/**/*.property.{test,spec}.{ts,tsx}',
+    ],
+    // Exclude E2E tests (run with Playwright instead)
+    exclude: [
+      'node_modules/',
+      'dist/',
+      '.idea/',
+      '.git/',
+      '.cache/',
+      'src/test/e2e/**',
     ],
   },
 })

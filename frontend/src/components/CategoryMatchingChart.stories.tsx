@@ -2,6 +2,29 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { CategoryMatchingChart } from './CategoryMatchingChart';
 import { CategoryMatchingReasoning } from '@/types/reasoning';
 
+/**
+ * CategoryMatchingChart displays category matching scores as horizontal bar charts.
+ * 
+ * ## Color Coding
+ * - **Green** (>0.7): High match score
+ * - **Yellow** (0.3-0.7): Medium match score
+ * - **Red** (<0.3): Low match score
+ * 
+ * ## Features
+ * - Shows at least top 3 categories
+ * - Scores displayed as percentages
+ * - Click to expand reasons
+ * - Feature contributions breakdown
+ * - Responsive layout
+ * 
+ * ## Accessibility
+ * - ARIA labels for chart elements
+ * - Keyboard navigable
+ * - Screen reader friendly
+ * 
+ * ## Usage
+ * Used in ReasoningPanel to show category matching reasoning.
+ */
 const meta = {
   title: 'Components/CategoryMatchingChart',
   component: CategoryMatchingChart,
@@ -9,6 +32,15 @@ const meta = {
     layout: 'padded',
   },
   tags: ['autodocs'],
+  argTypes: {
+    categories: {
+      description: 'Array of category matching data with scores and reasons',
+    },
+    onCategoryClick: {
+      description: 'Optional callback when a category is clicked',
+      action: 'category clicked',
+    },
+  },
 } satisfies Meta<typeof CategoryMatchingChart>;
 
 export default meta;
@@ -64,12 +96,20 @@ const mockCategories: CategoryMatchingReasoning[] = [
   },
 ];
 
+/**
+ * Default category matching with mixed scores
+ * Shows green, yellow, and red bars based on score ranges
+ */
 export const Default: Story = {
   args: {
     categories: mockCategories,
   },
 };
 
+/**
+ * All categories with high scores (>0.7)
+ * All bars should be green
+ */
 export const HighScoresOnly: Story = {
   args: {
     categories: [
@@ -103,6 +143,10 @@ export const HighScoresOnly: Story = {
   },
 };
 
+/**
+ * All categories with low scores (<0.3)
+ * All bars should be red
+ */
 export const LowScoresOnly: Story = {
   args: {
     categories: [
@@ -134,12 +178,18 @@ export const LowScoresOnly: Story = {
   },
 };
 
+/**
+ * Mixed score ranges demonstrating all color codes
+ */
 export const MixedScores: Story = {
   args: {
     categories: mockCategories,
   },
 };
 
+/**
+ * Minimum of 3 categories (requirement validation)
+ */
 export const MinimumCategories: Story = {
   args: {
     categories: [
@@ -171,6 +221,9 @@ export const MinimumCategories: Story = {
   },
 };
 
+/**
+ * Many categories (8+) to test scrolling behavior
+ */
 export const ManyCategories: Story = {
   args: {
     categories: [
@@ -226,12 +279,19 @@ export const ManyCategories: Story = {
   },
 };
 
+/**
+ * Empty state - no categories available
+ */
 export const EmptyState: Story = {
   args: {
     categories: [],
   },
 };
 
+/**
+ * Interactive category click handler
+ * Click on a category to see its details
+ */
 export const WithClickHandler: Story = {
   args: {
     categories: mockCategories,

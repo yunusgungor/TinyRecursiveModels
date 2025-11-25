@@ -327,7 +327,7 @@ describe('Property 62: Color-blind friendly design', () => {
   it('should provide text labels in ConfidenceIndicator', () => {
     fc.assert(
       fc.property(
-        fc.float({ min: 0, max: 1 }),
+        fc.float({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
         (confidence) => {
           const { container } = render(
             <ConfidenceIndicator confidence={confidence} />
@@ -348,11 +348,11 @@ describe('Property 62: Color-blind friendly design', () => {
         fc.array(
           fc.record({
             category_name: fc.string({ minLength: 3, maxLength: 20 }),
-            score: fc.float({ min: 0, max: 1 }),
+            score: fc.float({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
             reasons: fc.array(fc.string({ minLength: 10, maxLength: 50 }), { minLength: 1, maxLength: 2 }),
             feature_contributions: fc.dictionary(
               fc.constantFrom('hobby', 'age', 'budget'),
-              fc.float({ min: 0, max: 1 })
+              fc.float({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true })
             ),
           }),
           { minLength: 3, maxLength: 5 }

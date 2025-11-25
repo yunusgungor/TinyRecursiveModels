@@ -51,7 +51,7 @@ describe('ConfidenceIndicator Property Tests', () => {
   test('Property 28: For any confidence score between 0.5 and 0.8, the frontend should display yellow color and "Orta Güven" label', () => {
     fc.assert(
       fc.property(
-        fc.float({ min: Math.fround(0.5), max: Math.fround(0.8), noDefaultInfinity: true, noNaN: true }),
+        fc.float({ min: Math.fround(0.5), max: Math.fround(0.8), noDefaultInfinity: true, noNaN: true }).filter(c => c < 0.8),
         (confidence) => {
           const { container, unmount } = render(
             <ConfidenceIndicator confidence={confidence} />

@@ -120,14 +120,14 @@ describe('ConfidenceExplanationModal Property Tests', () => {
       fc.property(
         // Generate random confidence score
         fc.float({ min: 0.0, max: 1.0, noDefaultInfinity: true, noNaN: true }),
-        // Generate at least 1 positive factor - use alphanumeric strings
+        // Generate at least 1 positive factor - use alphanumeric strings with unique prefix
         fc.array(
-          fc.stringMatching(/^[a-zA-Z0-9 ]{5,100}$/),
+          fc.stringMatching(/^[a-zA-Z0-9 ]{5,100}$/).map(s => `positive_${s}`),
           { minLength: 1, maxLength: 10 }
         ),
-        // Generate at least 1 negative factor - use alphanumeric strings
+        // Generate at least 1 negative factor - use alphanumeric strings with unique prefix
         fc.array(
-          fc.stringMatching(/^[a-zA-Z0-9 ]{5,100}$/),
+          fc.stringMatching(/^[a-zA-Z0-9 ]{5,100}$/).map(s => `negative_${s}`),
           { minLength: 1, maxLength: 10 }
         ),
         (score, positiveFactors, negativeFactors) => {
