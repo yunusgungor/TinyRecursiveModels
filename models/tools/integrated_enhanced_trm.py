@@ -25,6 +25,12 @@ class IntegratedEnhancedTRMConfig(RLTRMConfig):
     occasion_embedding_dim: int = 32
     age_encoding_dim: int = 16
     
+    # Vocabulary sizes (for loading checkpoints with different vocab sizes)
+    hobby_vocab_size: int = None  # Will be set from checkpoint or dynamic categories
+    preference_vocab_size: int = None
+    occasion_vocab_size: int = None
+    category_vocab_size: int = None
+    
     # Enhanced category matching
     category_embedding_dim: int = 128
     category_attention_heads: int = 8
@@ -169,14 +175,21 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         """Initialize enhanced user profiling components"""
         config = self.enhanced_config
         
+        # Use config-specified vocab sizes if available (for loading checkpoints)
+        # Otherwise use dynamically loaded categories
+        # Check both __dict__ and direct attribute access
+        hobby_vocab_size = getattr(config, 'hobby_vocab_size', None) or config.__dict__.get('hobby_vocab_size', len(self.hobby_categories))
+        preference_vocab_size = getattr(config, 'preference_vocab_size', None) or config.__dict__.get('preference_vocab_size', len(self.preference_categories))
+        occasion_vocab_size = getattr(config, 'occasion_vocab_size', None) or config.__dict__.get('occasion_vocab_size', len(self.occasion_categories))
+        
         # Hobby embeddings with semantic understanding (categories loaded dynamically)
-        self.hobby_embeddings = nn.Embedding(len(self.hobby_categories), config.hobby_embedding_dim)
+        self.hobby_embeddings = nn.Embedding(hobby_vocab_size, config.hobby_embedding_dim)
         
         # Preference embeddings (categories loaded dynamically)
-        self.preference_embeddings = nn.Embedding(len(self.preference_categories), config.preference_embedding_dim)
+        self.preference_embeddings = nn.Embedding(preference_vocab_size, config.preference_embedding_dim)
         
         # Occasion embeddings (categories loaded dynamically)
-        self.occasion_embeddings = nn.Embedding(len(self.occasion_categories), config.occasion_embedding_dim)
+        self.occasion_embeddings = nn.Embedding(occasion_vocab_size, config.occasion_embedding_dim)
         
         # Age encoding (continuous)
         self.age_encoder = nn.Sequential(
@@ -208,8 +221,11 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         """Initialize enhanced category matching components"""
         config = self.enhanced_config
         
+        # Use config-specified vocab size if available (for loading checkpoints)
+        category_vocab_size = getattr(config, 'category_vocab_size', None) or config.__dict__.get('category_vocab_size', len(self.gift_categories))
+        
         # Gift categories (loaded dynamically)
-        self.category_embeddings = nn.Embedding(len(self.gift_categories), config.category_embedding_dim)
+        self.category_embeddings = nn.Embedding(category_vocab_size, config.category_embedding_dim)
         
         # Semantic matching network - each layer processes category_embedding_dim
         self.semantic_matcher = nn.ModuleList([
@@ -269,8 +285,11 @@ class IntegratedEnhancedTRM(RLEnhancedTRM):
         
         # Tool parameter generator context projection
         # Pre-create projection layer to ensure gradient flow
+        # Use config-specified vocab size if available (for loading checkpoints)
+        category_vocab_size = getattr(config, 'category_vocab_size', None) or config.__dict__.get('category_vocab_size', len(self.gift_categories))
+        
         self.tool_param_context_proj = nn.Linear(
-            config.user_profile_encoding_dim + len(self.gift_categories),
+            config.user_profile_encoding_dim + category_vocab_size,
             config.tool_context_encoding_dim + config.user_profile_encoding_dim
         )
         

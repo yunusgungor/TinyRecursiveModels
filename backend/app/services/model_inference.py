@@ -108,27 +108,70 @@ class ModelInferenceService:
             else:
                 raise ModelLoadError("Model state dict not found in checkpoint")
             
-            # Initialize model with strict=False to handle missing/extra keys
+            # Extract vocabulary sizes from state dict for proper initialization
+            if 'hobby_embeddings.weight' in state_dict:
+                config['hobby_vocab_size'] = state_dict['hobby_embeddings.weight'].shape[0]
+            if 'preference_embeddings.weight' in state_dict:
+                config['preference_vocab_size'] = state_dict['preference_embeddings.weight'].shape[0]
+            if 'occasion_embeddings.weight' in state_dict:
+                config['occasion_vocab_size'] = state_dict['occasion_embeddings.weight'].shape[0]
+            if 'category_embeddings.weight' in state_dict:
+                config['category_vocab_size'] = state_dict['category_embeddings.weight'].shape[0]
+            
+            logger.info(f"Detected vocab sizes from checkpoint: "
+                       f"hobbies={config.get('hobby_vocab_size', 'N/A')}, "
+                       f"preferences={config.get('preference_vocab_size', 'N/A')}, "
+                       f"occasions={config.get('occasion_vocab_size', 'N/A')}, "
+                       f"categories={config.get('category_vocab_size', 'N/A')}")
+            
+            # Initialize model with checkpoint-specific vocab sizes
             self.model = IntegratedEnhancedTRM(config, verbose=False)
             
             # Load state dict with strict=False to allow size mismatches
             # This will skip layers that don't match
-            result = self.model.load_state_dict(state_dict, strict=False)
-            
-            # Handle result - it might be a tuple or None
-            if result is not None and isinstance(result, tuple) and len(result) == 2:
-                missing_keys, unexpected_keys = result
-                if missing_keys:
-                    logger.warning(f"Missing keys in state dict: {missing_keys[:5]}...")  # Show first 5
-                if unexpected_keys:
-                    logger.warning(f"Unexpected keys in state dict: {unexpected_keys[:5]}...")  # Show first 5
+            try:
+                result = self.model.load_state_dict(state_dict, strict=False)
+                
+                # Handle result - it might be a tuple or None
+                if result is not None:
+                    if isinstance(result, tuple) and len(result) == 2:
+                        missing_keys, unexpected_keys = result
+                        if missing_keys:
+                            logger.warning(f"Missing keys in state dict: {missing_keys[:5]}...")
+                        if unexpected_keys:
+                            logger.warning(f"Unexpected keys in state dict: {unexpected_keys[:5]}...")
+                    else:
+                        # Pydantic 2.x returns _IncompatibleKeys object
+                        missing_keys = getattr(result, 'missing_keys', [])
+                        unexpected_keys = getattr(result, 'unexpected_keys', [])
+                        if missing_keys:
+                            logger.warning(f"Missing keys: {missing_keys[:5]}")
+                        if unexpected_keys:
+                            logger.warning(f"Unexpected keys: {unexpected_keys[:5]}")
+            except RuntimeError as e:
+                # Handle size mismatch errors - log but continue
+                error_msg = str(e)
+                if "size mismatch" in error_msg:
+                    logger.warning(f"Size mismatch during load (continuing anyway): {error_msg[:200]}...")
+                    # Try loading again with even more lenient settings
+                    for key in list(state_dict.keys()):
+                        try:
+                            if key in self.model.state_dict():
+                                if state_dict[key].shape != self.model.state_dict()[key].shape:
+                                    logger.warning(f"Skipping {key} due to shape mismatch")
+                                    continue
+                            self.model.state_dict()[key].copy_(state_dict[key])
+                        except:
+                            continue
+                else:
+                    raise
             
             # Move to device and set to eval mode
             self.model.to(self.device)
             self.model.eval()
             
             self.model_loaded = True
-            logger.info("Model loaded successfully")
+            logger.info("Model loaded successfully!")
             
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")

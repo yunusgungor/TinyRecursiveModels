@@ -9,6 +9,7 @@ from app.models.schemas import (
     RecommendationRequest,
     RecommendationResponse,
     EnhancedRecommendationResponse,
+    UserProfile,
     GiftItem,
     GiftRecommendation,
     EnhancedGiftRecommendation
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/recommendations", response_model=EnhancedRecommendationResponse)
+@router.post("/recommendations", response_model=EnhancedRecommendationResponse, response_model_by_alias=True)
 async def get_recommendations(
     request: RecommendationRequest,
     include_reasoning: Optional[bool] = Query(
@@ -154,10 +155,17 @@ async def get_recommendations(
         model_service = get_model_service()
         
         if not model_service.is_loaded():
-            logger.error("Model not loaded")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Model şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin."
+            logger.warning("Model not loaded, returning mock recommendations")
+            # Return mock recommendations for demo purposes
+            mock_recommendations = _generate_mock_recommendations(request.user_profile)
+            inference_time = time.time() - start_time
+            
+            return EnhancedRecommendationResponse(
+                recommendations=mock_recommendations[:request.max_recommendations],
+                tool_results={"demo_mode": True, "message": "Model yüklenmedi, demo veriler gösteriliyor"},
+                reasoning_trace=None,
+                inference_time=inference_time,
+                cache_hit=False
             )
         
         # Step 3: Fetch available gifts from Trendyol
@@ -199,10 +207,17 @@ async def get_recommendations(
                 )
         
         except TrendyolAPIError as e:
-            logger.error(f"Trendyol API error: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Ürün verileri şu anda alınamıyor. Lütfen daha sonra tekrar deneyin."
+            logger.warning(f"Trendyol API error (using mock data): {e}")
+            # Use mock gifts when Trendyol API is unavailable
+            mock_recommendations = _generate_mock_recommendations(request.user_profile)
+            inference_time = time.time() - start_time
+            
+            return EnhancedRecommendationResponse(
+                recommendations=mock_recommendations[:request.max_recommendations],
+                tool_results={"trendyol_api_error": True, "message": "Trendyol API kullanılamıyor, demo veriler gösteriliyor"},
+                reasoning_trace=None,
+                inference_time=inference_time,
+                cache_hit=False
             )
         
         # Step 4: Run model inference with reasoning parameters
@@ -342,6 +357,80 @@ def _determine_category(user_profile) -> str:
     
     # Default category
     return "Hediye"
+
+
+def _generate_mock_recommendations(user_profile: UserProfile) -> List[EnhancedGiftRecommendation]:
+    """
+    Generate mock recommendations for demo purposes
+    
+    Args:
+        user_profile: User profile data
+        
+    Returns:
+        List of mock recommendations
+    """
+    mock_gifts = [
+        GiftItem(
+            id="mock-1",
+            name="Premium Kahve Seti",
+            category="Ev & Yaşam",
+            price=299.99,
+            rating=4.5,
+            image_url="https://cdn.dummyjson.com/products/images/groceries/Coffee%20Beans/1.png",
+            trendyol_url="https://www.trendyol.com/demo",
+            description="Özel kahve seti",
+            tags=["kahve", "hediye"],
+            age_suitability=(18, 100),
+            occasion_fit=["birthday", "anniversary"],
+            in_stock=True
+        ),
+        GiftItem(
+            id="mock-2",
+            name="Spor Ekipmanı Seti",
+            category="Spor & Outdoor",
+            price=450.00,
+            rating=4.7,
+            image_url="https://cdn.dummyjson.com/products/images/sports-accessories/Baseball%20Glove/1.png",
+            trendyol_url="https://www.trendyol.com/demo",
+            description="Kaliteli spor ekipmanları",
+            tags=["spor", "fitness"],
+            age_suitability=(18, 100),
+            occasion_fit=["birthday"],
+            in_stock=True
+        ),
+        GiftItem(
+            id="mock-3",
+            name="Kitap Seti",
+            category="Kitap",
+            price=199.99,
+            rating=4.8,
+            image_url="https://cdn.dummyjson.com/products/images/furniture/Annibale%20Colombo%20Bed/1.png",
+            trendyol_url="https://www.trendyol.com/demo",
+            description="Bestseller kitap koleksiyonu",
+            tags=["kitap", "okuma"],
+            age_suitability=(18, 100),
+            occasion_fit=["birthday", "graduation"],
+            in_stock=True
+        ),
+    ]
+    
+    recommendations = []
+    for i, gift in enumerate(mock_gifts):
+        rec = EnhancedGiftRecommendation(
+            gift=gift,
+            confidence_score=0.85 - (i * 0.1),
+            reasoning=[
+                f"Bütçenize uygun: {gift.price} TL",
+                f"Yüksek değerlendirme: {gift.rating}/5.0",
+                "Demo mod - gerçek öneriler için model yüklenmelidir"
+            ],
+            tool_insights={},
+            rank=i + 1,
+            reasoning_trace=None
+        )
+        recommendations.append(rec)
+    
+    return recommendations
 
 
 def _generate_keywords(user_profile) -> List[str]:

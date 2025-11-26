@@ -2,7 +2,21 @@
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, ConfigDict
+
+
+def to_camel(string: str) -> str:
+    """Convert snake_case to camelCase"""
+    components = string.split('_')
+    return components[0] + ''.join(x.title() for x in components[1:])
+
+
+class CamelCaseModel(BaseModel):
+    """Base model with camelCase alias generation"""
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True
+    )
 
 
 class UserProfile(BaseModel):
@@ -44,7 +58,7 @@ class UserProfile(BaseModel):
         }
 
 
-class GiftItem(BaseModel):
+class GiftItem(CamelCaseModel):
     """Gift item data model"""
     
     id: str = Field(description="Unique product identifier")
@@ -133,7 +147,7 @@ class ToolResults(BaseModel):
     budget_optimizer: Optional[BudgetOptimizerResult] = None
 
 
-class GiftRecommendation(BaseModel):
+class GiftRecommendation(CamelCaseModel):
     """Gift recommendation with confidence score"""
     
     gift: GiftItem
@@ -149,9 +163,12 @@ class GiftRecommendation(BaseModel):
 class RecommendationRequest(BaseModel):
     """Request for gift recommendations"""
     
-    user_profile: UserProfile
-    max_recommendations: int = Field(default=5, ge=1, le=20)
-    use_cache: bool = Field(default=True)
+    user_profile: UserProfile = Field(alias="userProfile")
+    max_recommendations: int = Field(default=5, ge=1, le=20, alias="maxRecommendations")
+    use_cache: bool = Field(default=True, alias="useCache")
+    
+    class Config:
+        populate_by_name = True  # Accept both snake_case and camelCase
 
 
 class RecommendationResponse(BaseModel):
@@ -460,7 +477,7 @@ class EnhancedGiftRecommendation(GiftRecommendation):
         }
 
 
-class EnhancedRecommendationResponse(BaseModel):
+class EnhancedRecommendationResponse(CamelCaseModel):
     """Enhanced recommendation response with reasoning"""
     
     recommendations: List[EnhancedGiftRecommendation] = Field(

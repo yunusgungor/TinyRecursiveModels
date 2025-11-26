@@ -34,7 +34,8 @@ export function HomePage() {
     try {
       // Import the API client
       const { recommendationsApi } = await import('@/lib/api/recommendations');
-      const response = await recommendationsApi.getRecommendations(profile, {
+      const response = await recommendationsApi.getRecommendations({
+        userProfile: profile,
         maxRecommendations: 5,
         useCache: true,
       });
@@ -186,7 +187,7 @@ export function HomePage() {
                 {data.recommendations.length} öneri bulundu
                 {data.cacheHit && ' (Önbellekten)'}
                 {' • '}
-                İşlem süresi: {data.inferenceTime.toFixed(2)}s
+                İşlem süresi: {data.inferenceTime?.toFixed(2) || data.inference_time?.toFixed(2) || '0.00'}s
               </p>
             </div>
             <button

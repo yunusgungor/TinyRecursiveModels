@@ -38,6 +38,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Failed to setup tracing: {e}")
     
+    # Load model at startup
+    try:
+        from app.services.model_inference import get_model_service
+        model_service = get_model_service()
+        model_service.load_model()
+        logger.info("Model loaded successfully at startup")
+    except Exception as e:
+        logger.warning(f"Failed to load model at startup: {e}. Will run in demo mode.")
+    
     # Start resource monitoring background task
     import asyncio
     from app.services.monitoring_service import monitoring_service
