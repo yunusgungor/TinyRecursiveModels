@@ -7,3 +7,4 @@ black==23.11.0
 mypy==1.7.0
 ruff==0.1.6
 pre-commit==3.5.0
+docker==7.0.0

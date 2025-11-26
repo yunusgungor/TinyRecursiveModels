@@ -19,21 +19,26 @@ spec:
     metadata:
       labels:
         app: frontend
+      annotations:
+        # Automatically restart pods when ConfigMap or Secret changes
+        # Update these checksums when config/secrets change to trigger rolling restart
+        checksum/config: "{{ include (print $.Template.BasePath \"/configmap.yaml\") . | sha256sum }}"
+        checksum/secret: "{{ include (print $.Template.BasePath \"/secrets.yaml\") . | sha256sum }}"
     spec:
       containers:
       - name: frontend
         image: trendyol-gift-frontend:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent  # Cache optimization - only pull if not present locally
         ports:
         - containerPort: 80
           name: http
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "64Mi"
+            cpu: "50m"
           limits:
-            memory: "256Mi"
-            cpu: "200m"
+            memory: "512M"
+            cpu: "500m"
         livenessProbe:
           httpGet:
             path: /

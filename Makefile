@@ -76,3 +76,49 @@ init: setup-env install ## Initialize project (setup env + install deps)
 	@echo "Next steps:"
 	@echo "  1. Update .env files with your configuration"
 	@echo "  2. Run 'make dev' to start development environment"
+
+# BuildKit targets
+setup-buildkit: ## Setup and enable BuildKit
+	@echo "Setting up BuildKit..."
+	@bash scripts/setup-buildkit.sh
+
+buildkit-env: ## Source BuildKit environment variables
+	@echo "Loading BuildKit environment..."
+	@echo "Run: source .buildkit.env"
+
+buildkit-verify: ## Verify BuildKit installation
+	@bash scripts/verify-buildkit.sh
+
+build-optimized: ## Build with BuildKit optimizations
+	@echo "Building with BuildKit optimizations..."
+	@export DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 && docker-compose build --progress=plain
+
+build-backend: ## Build backend with BuildKit
+	@echo "Building backend..."
+	@export DOCKER_BUILDKIT=1 && docker build --progress=plain -t backend:latest ./backend
+
+build-frontend: ## Build frontend with BuildKit
+	@echo "Building frontend..."
+	@export DOCKER_BUILDKIT=1 && docker build --progress=plain -t frontend:latest ./frontend
+
+# Security scanning targets
+scan: ## Run all security scans
+	@bash scripts/scan-vulnerabilities.sh
+
+scan-images: ## Scan Docker images for vulnerabilities
+	@bash scripts/scan-vulnerabilities.sh --images-only
+
+scan-deps: ## Scan dependencies for vulnerabilities
+	@bash scripts/scan-vulnerabilities.sh --deps-only
+
+scan-secrets: ## Scan repository for secrets
+	@bash scripts/scan-vulnerabilities.sh --secrets-only
+
+scan-critical: ## Scan and fail on critical vulnerabilities
+	@bash scripts/scan-vulnerabilities.sh --fail-on-critical
+
+verify-permissions: ## Verify file permissions in containers
+	@bash scripts/verify-file-permissions.sh
+
+security-check: scan-critical verify-permissions ## Run all security checks
+	@echo "All security checks completed!"

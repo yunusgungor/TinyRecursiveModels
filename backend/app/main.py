@@ -38,9 +38,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Failed to setup tracing: {e}")
     
+    # Start resource monitoring background task
+    import asyncio
+    from app.services.monitoring_service import monitoring_service
+    
+    async def monitor_resources():
+        """Background task to monitor resource usage"""
+        while True:
+            try:
+                # Check resource limits every 30 seconds
+                await asyncio.sleep(30)
+                monitoring_service.check_resource_limits()
+            except Exception as e:
+                logger.error(f"Error in resource monitoring: {e}")
+    
+    monitoring_task = asyncio.create_task(monitor_resources())
+    
     yield
     
     # Shutdown
+    monitoring_task.cancel()
+    try:
+        await monitoring_task
+    except asyncio.CancelledError:
+        pass
+    
     logger.info("Shutting down Trendyol Gift Recommendation API")
 
 

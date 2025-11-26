@@ -1,0 +1,47 @@
+# Trivy Ignore File
+# Use this file to ignore false positives or accepted risks
+# Copy to .trivyignore and customize for your project
+
+# Format:
+# CVE-ID [package-name] [exp:YYYY-MM-DD]
+
+# Example: Ignore specific CVE
+# CVE-2023-12345
+
+# Example: Ignore CVE in specific package
+# CVE-2023-12345 python-package
+
+# Example: Ignore with expiration date
+# CVE-2023-12345 exp:2024-12-31
+
+# Example: Ignore CVE with comment
+# CVE-2023-12345  # Not exploitable in our use case
+
+# ============================================
+# Accepted Risks
+# ============================================
+# Document why each CVE is ignored below
+
+# CVE-YYYY-XXXXX
+# Reason: [Explain why this is acceptable]
+# Mitigation: [Describe any mitigations in place]
+# Review Date: [When to review this decision]
+# Approved By: [Who approved this risk]
+
+# ============================================
+# False Positives
+# ============================================
+# Document false positives below
+
+# CVE-YYYY-XXXXX
+# Reason: False positive - [explain why]
+# Verified: [Date verified as false positive]
+
+# ============================================
+# Temporary Ignores
+# ============================================
+# Use expiration dates for temporary ignores
+
+# CVE-YYYY-XXXXX exp:2024-12-31
+# Reason: Waiting for upstream fix
+# Tracking: [Link to issue/PR]

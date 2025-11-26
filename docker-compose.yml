@@ -15,11 +15,22 @@ services:
       - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 5
     networks:
       - trendyol-network
+    restart: unless-stopped
+    # Service isolation: no shared volumes with other services
+    # State persisted in named volume, independent of other services
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
   # Redis Cache
   redis:
@@ -31,34 +42,57 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 5
     networks:
       - trendyol-network
+    restart: unless-stopped
+    # Service isolation: independent state in named volume
+    # No shared state with other services
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   # Backend API
   backend:
     build:
       context: ./backend
       target: development
+      cache_from:
+        - ${REGISTRY:-ghcr.io/yourusername}/backend:cache
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: trendyol-gift-backend
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-trendyol_gift}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-redis}@redis:6379/0
-      - TRENDYOL_API_KEY=${TRENDYOL_API_KEY}
-      - TRENDYOL_API_SECRET=${TRENDYOL_API_SECRET}
+      - TRENDYOL_API_KEY=${TRENDYOL_API_KEY:-}
+      - TRENDYOL_API_SECRET=${TRENDYOL_API_SECRET:-}
       - MODEL_CHECKPOINT_PATH=/app/checkpoints/integrated_enhanced/integrated_enhanced_best.pt
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
-      - ENVIRONMENT=development
-      - LOG_LEVEL=DEBUG
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+      - DEBUG=${DEBUG:-true}
+      - PYTHONUNBUFFERED=1
     volumes:
+      # Hot reload: mount source code
       - ./backend:/app
+      # Exclude dependencies from mount
+      - /app/__pycache__
+      - backend-packages:/root/.cache/pip
+      # Mount shared resources (read-only for isolation)
       - ./checkpoints:/app/checkpoints:ro
       - ./models:/app/models:ro
     ports:
       - "8000:8000"
+      - "5678:5678"  # Debug port
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,27 +100,57 @@ services:
         condition: service_healthy
     networks:
       - trendyol-network
+    restart: unless-stopped
+    # Service isolation: stateless application, can restart independently
+    # Dependencies are health-checked but restart doesn't affect them
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
 
   # Frontend
   frontend:
     build:
       context: ./frontend
       target: development
+      cache_from:
+        - ${REGISTRY:-ghcr.io/yourusername}/frontend:cache
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     container_name: trendyol-gift-frontend
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+      - VITE_HMR_HOST=${VITE_HMR_HOST:-localhost}
+      - NODE_ENV=${NODE_ENV:-development}
     volumes:
+      # Hot reload: mount source code
       - ./frontend:/app
-      - /app/node_modules
+      # Persist node_modules in named volume (isolated from other services)
+      - frontend-node-modules:/app/node_modules
     ports:
       - "3000:3000"
     depends_on:
       - backend
     networks:
       - trendyol-network
+    restart: unless-stopped
+    # Service isolation: stateless frontend, independent restart capability
+    # Only depends on backend API, no shared state
     stdin_open: true
     tty: true
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
   # Nginx Reverse Proxy (Production-like)
   nginx:
@@ -102,12 +166,25 @@ services:
       - frontend
     networks:
       - trendyol-network
+    restart: unless-stopped
+    # Service isolation: stateless proxy, can restart without affecting upstream services
+    # Read-only config mounts ensure no state modification
     profiles:
       - production
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
 volumes:
   postgres_data:
   redis_data:
+  backend-packages:
+  frontend-node-modules:
 
 networks:
   trendyol-network:

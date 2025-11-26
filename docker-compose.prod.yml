@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: trendyol-gift-postgres-prod
@@ -10,41 +11,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
-    networks:
-      - trendyol-network-prod
-
-  redis:
-    image: redis:7-alpine
-    container_name: trendyol-gift-redis-prod
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
-    volumes:
-      - redis_data_prod:/data
-    restart: unless-stopped
-    networks:
-      - trendyol-network-prod
-
-  backend:
-    build:
-      context: ./backend
-      target: production
-    container_name: trendyol-gift-backend-prod
-    environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - TRENDYOL_API_KEY=${TRENDYOL_API_KEY}
-      - TRENDYOL_API_SECRET=${TRENDYOL_API_SECRET}
-      - MODEL_CHECKPOINT_PATH=/app/checkpoints/integrated_enhanced/integrated_enhanced_best.pt
-      - SECRET_KEY=${SECRET_KEY}
-      - ENVIRONMENT=production
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./checkpoints:/app/checkpoints:ro
-      - ./models:/app/models:ro
-    restart: unless-stopped
-    depends_on:
-      - postgres
-      - redis
     networks:
       - trendyol-network-prod
     deploy:
@@ -56,17 +28,99 @@ services:
           cpus: '1'
           memory: 2G
 
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: trendyol-gift-redis-prod
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data_prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - trendyol-network-prod
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      target: production
+      cache_from:
+        - ${REGISTRY:-ghcr.io/yourusername}/backend:latest
+        - ${REGISTRY:-ghcr.io/yourusername}/backend:cache
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    image: ${REGISTRY:-ghcr.io/yourusername}/backend:${VERSION:-latest}
+    container_name: trendyol-gift-backend-prod
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - TRENDYOL_API_KEY=${TRENDYOL_API_KEY}
+      - TRENDYOL_API_SECRET=${TRENDYOL_API_SECRET}
+      - MODEL_CHECKPOINT_PATH=/app/checkpoints/integrated_enhanced/integrated_enhanced_best.pt
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./checkpoints:/app/checkpoints:ro
+      - ./models:/app/models:ro
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trendyol-network-prod
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # Frontend
   frontend:
     build:
       context: ./frontend
       target: production
+      cache_from:
+        - ${REGISTRY:-ghcr.io/yourusername}/frontend:latest
+        - ${REGISTRY:-ghcr.io/yourusername}/frontend:cache
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    image: ${REGISTRY:-ghcr.io/yourusername}/frontend:${VERSION:-latest}
     container_name: trendyol-gift-frontend-prod
     restart: unless-stopped
     depends_on:
       - backend
     networks:
       - trendyol-network-prod
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
+  # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
     container_name: trendyol-gift-nginx-prod
@@ -82,6 +136,14 @@ services:
       - frontend
     networks:
       - trendyol-network-prod
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
 volumes:
   postgres_data_prod:

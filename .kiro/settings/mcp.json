@@ -37,7 +37,8 @@
         "browser_click",
         "browser_screenshot",
         "browser_snapshot",
-        "browser_type"
+        "browser_type",
+        "browser_wait"
       ]
     }
   }

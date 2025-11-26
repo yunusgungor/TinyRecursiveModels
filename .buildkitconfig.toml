@@ -1,0 +1,49 @@
+# BuildKit Configuration
+# This file configures BuildKit for optimal build performance
+
+[worker.oci]
+  enabled = true
+  # Maximum parallelism for build operations
+  max-parallelism = 4
+
+[worker.containerd]
+  enabled = true
+  platforms = ["linux/amd64"]
+  namespace = "buildkit"
+
+# Registry configuration for cache
+[registry."docker.io"]
+  mirrors = []
+
+# Cache configuration
+[cache]
+  # Enable inline cache by default
+  inline = true
+  # Maximum cache size (in MB)
+  max-size = 10240
+
+# Build history configuration
+[history]
+  # Keep build history for debugging
+  max-age = 168h  # 7 days
+  max-entries = 100
+
+# GC (Garbage Collection) configuration
+[gc]
+  enabled = true
+  # GC policy: keep cache for 7 days
+  policy = [
+    {keepDuration = "168h", keepBytes = "10GB"},
+    {keepDuration = "48h", keepBytes = "5GB"},
+    {all = true, keepBytes = "2GB"}
+  ]
+
+# Network configuration
+[network]
+  # Enable network mode for build
+  mode = "default"
+
+# Debug configuration
+[debug]
+  # Enable debug logging (set to false in production)
+  enabled = false

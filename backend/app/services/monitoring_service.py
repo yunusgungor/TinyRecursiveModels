@@ -108,6 +108,11 @@ class MonitoringService:
         self.metrics_collector = MetricsCollector()
         self._model_loaded = False
         self._model_load_time: Optional[datetime] = None
+        self._container_start_time = datetime.utcnow()
+        self._restart_count = 0
+        self._restart_history: list = []  # Store last 10 restarts
+        self._health_check_failures: Dict[str, int] = defaultdict(int)
+        self._last_health_check_errors: Dict[str, Dict[str, Any]] = {}
     
     def set_model_loaded(self, loaded: bool) -> None:
         """Set model loaded status"""
@@ -184,26 +189,68 @@ class MonitoringService:
             "timestamp": datetime.utcnow().isoformat()
         }
     
+    def record_health_check_failure(
+        self,
+        check_name: str,
+        endpoint: str,
+        status_code: Optional[int],
+        error_message: str,
+        response_body: Optional[str] = None
+    ) -> None:
+        """Record a health check failure with detailed information"""
+        self._health_check_failures[check_name] += 1
+        
+        error_details = {
+            "check_name": check_name,
+            "endpoint": endpoint,
+            "status_code": status_code,
+            "error_message": error_message,
+            "response_body": response_body[:500] if response_body else None,  # Limit size
+            "timestamp": datetime.utcnow().isoformat(),
+            "failure_count": self._health_check_failures[check_name]
+        }
+        
+        self._last_health_check_errors[check_name] = error_details
+        
+        logger.error(
+            f"Health check failed: {check_name}",
+            extra=error_details
+        )
+    
     def check_cache_status(self) -> str:
         """Check cache service status"""
-        # This will be implemented when cache service is available
-        # For now, return a placeholder
+        check_name = "cache"
+        endpoint = "redis://redis:6379"
+        
         try:
             # TODO: Implement actual cache health check
+            # For now, return healthy as placeholder
             return "healthy"
         except Exception as e:
-            logger.error(f"Cache health check failed: {e}")
+            self.record_health_check_failure(
+                check_name=check_name,
+                endpoint=endpoint,
+                status_code=None,
+                error_message=str(e)
+            )
             return "unhealthy"
     
     def check_trendyol_api_status(self) -> str:
         """Check Trendyol API status"""
-        # This will be implemented when Trendyol service is available
-        # For now, return a placeholder
+        check_name = "trendyol_api"
+        endpoint = "https://api.trendyol.com"
+        
         try:
             # TODO: Implement actual API health check
+            # For now, return healthy as placeholder
             return "healthy"
         except Exception as e:
-            logger.error(f"Trendyol API health check failed: {e}")
+            self.record_health_check_failure(
+                check_name=check_name,
+                endpoint=endpoint,
+                status_code=None,
+                error_message=str(e)
+            )
             return "unhealthy"
     
     def get_resource_metrics(self) -> Dict[str, Any]:
@@ -251,6 +298,121 @@ class MonitoringService:
         """Get performance metrics"""
         return self.metrics_collector.get_performance_metrics()
     
+    def record_container_restart(self, reason: str, previous_state: Optional[str] = None) -> None:
+        """Record a container restart event with detailed information"""
+        self._restart_count += 1
+        previous_uptime = (datetime.utcnow() - self._container_start_time).total_seconds()
+        
+        restart_event = {
+            "restart_count": self._restart_count,
+            "reason": reason,
+            "previous_state": previous_state or "unknown",
+            "timestamp": datetime.utcnow().isoformat(),
+            "previous_uptime_seconds": previous_uptime
+        }
+        
+        # Store in history (keep last 10)
+        self._restart_history.append(restart_event)
+        if len(self._restart_history) > 10:
+            self._restart_history = self._restart_history[-10:]
+        
+        logger.warning(
+            "Container restart detected",
+            extra=restart_event
+        )
+        
+        self._container_start_time = datetime.utcnow()
+    
+    def get_restart_history(self) -> Dict[str, Any]:
+        """Get container restart history"""
+        return {
+            "total_restarts": self._restart_count,
+            "restart_events": self._restart_history,
+            "current_uptime_seconds": (
+                datetime.utcnow() - self._container_start_time
+            ).total_seconds()
+        }
+    
+    def check_resource_limits(
+        self,
+        cpu_threshold: float = 80.0,
+        memory_threshold: float = 80.0
+    ) -> Dict[str, Any]:
+        """
+        Check if resource usage is approaching limits and emit warnings
+        
+        Args:
+            cpu_threshold: CPU usage percentage threshold (default: 80%)
+            memory_threshold: Memory usage percentage threshold (default: 80%)
+        
+        Returns:
+            Dictionary containing warnings and current resource usage
+        """
+        warnings = []
+        resource_metrics = self.get_resource_metrics()
+        
+        # Check CPU usage
+        cpu_percent = resource_metrics["cpu_percent"]
+        if cpu_percent >= cpu_threshold:
+            warning_msg = f"CPU usage at {cpu_percent:.1f}% (threshold: {cpu_threshold}%)"
+            warnings.append(warning_msg)
+            logger.warning(
+                "Resource limit warning: High CPU usage",
+                extra={
+                    "cpu_percent": cpu_percent,
+                    "threshold": cpu_threshold,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+        
+        # Check memory usage
+        memory_percent = resource_metrics["memory"]["percent"]
+        if memory_percent >= memory_threshold:
+            warning_msg = f"Memory usage at {memory_percent:.1f}% (threshold: {memory_threshold}%)"
+            warnings.append(warning_msg)
+            logger.warning(
+                "Resource limit warning: High memory usage",
+                extra={
+                    "memory_percent": memory_percent,
+                    "memory_used_mb": resource_metrics["memory"]["used_mb"],
+                    "memory_total_mb": resource_metrics["memory"]["total_mb"],
+                    "threshold": memory_threshold,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+        
+        # Check GPU memory if available
+        if resource_metrics["gpu"]:
+            for gpu in resource_metrics["gpu"]["devices"]:
+                # Calculate GPU memory usage percentage
+                allocated = gpu["memory_allocated_mb"]
+                reserved = gpu["memory_reserved_mb"]
+                if reserved > 0:
+                    gpu_percent = (allocated / reserved) * 100
+                    if gpu_percent >= memory_threshold:
+                        warning_msg = f"GPU {gpu['device_id']} memory at {gpu_percent:.1f}% (threshold: {memory_threshold}%)"
+                        warnings.append(warning_msg)
+                        logger.warning(
+                            "Resource limit warning: High GPU memory usage",
+                            extra={
+                                "gpu_device_id": gpu["device_id"],
+                                "gpu_memory_percent": gpu_percent,
+                                "gpu_memory_allocated_mb": allocated,
+                                "gpu_memory_reserved_mb": reserved,
+                                "threshold": memory_threshold,
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                        )
+        
+        return {
+            "warnings": warnings,
+            "cpu_percent": cpu_percent,
+            "memory_percent": memory_percent,
+            "cpu_threshold": cpu_threshold,
+            "memory_threshold": memory_threshold,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
     def get_health_status(self) -> Dict[str, Any]:
         """Get overall health status"""
         model_status = self.get_model_status()
@@ -278,6 +440,22 @@ class MonitoringService:
         """Export metrics in Prometheus format"""
         metrics = []
         
+        # Add HELP and TYPE comments for better Prometheus integration
+        metrics.append('# HELP container_cpu_usage_percent Container CPU usage percentage')
+        metrics.append('# TYPE container_cpu_usage_percent gauge')
+        
+        metrics.append('# HELP container_memory_usage_percent Container memory usage percentage')
+        metrics.append('# TYPE container_memory_usage_percent gauge')
+        
+        metrics.append('# HELP container_memory_used_mb Container memory used in megabytes')
+        metrics.append('# TYPE container_memory_used_mb gauge')
+        
+        metrics.append('# HELP container_uptime_seconds Container uptime in seconds')
+        metrics.append('# TYPE container_uptime_seconds counter')
+        
+        metrics.append('# HELP container_restart_count Total container restart count')
+        metrics.append('# TYPE container_restart_count counter')
+        
         # Tool usage metrics
         tool_stats = self.metrics_collector.get_tool_stats()
         for tool_name, count in tool_stats["tool_usage"].items():
@@ -296,11 +474,22 @@ class MonitoringService:
         metrics.append(f'total_inferences {perf_metrics["total_inferences"]}')
         metrics.append(f'total_requests {perf_metrics["total_requests"]}')
         
-        # Resource metrics
+        # Resource metrics (Container-specific)
         resource_metrics = self.get_resource_metrics()
-        metrics.append(f'cpu_usage_percent {resource_metrics["cpu_percent"]}')
-        metrics.append(f'memory_usage_percent {resource_metrics["memory"]["percent"]}')
-        metrics.append(f'memory_used_mb {resource_metrics["memory"]["used_mb"]}')
+        metrics.append(f'container_cpu_usage_percent {resource_metrics["cpu_percent"]}')
+        metrics.append(f'container_memory_usage_percent {resource_metrics["memory"]["percent"]}')
+        metrics.append(f'container_memory_used_mb {resource_metrics["memory"]["used_mb"]}')
+        metrics.append(f'container_memory_total_mb {resource_metrics["memory"]["total_mb"]}')
+        metrics.append(f'container_memory_available_mb {resource_metrics["memory"]["available_mb"]}')
+        
+        # Container lifecycle metrics
+        uptime_seconds = (datetime.utcnow() - self._container_start_time).total_seconds()
+        metrics.append(f'container_uptime_seconds {uptime_seconds}')
+        metrics.append(f'container_restart_count {self._restart_count}')
+        
+        # Health check failure metrics
+        for check_name, failure_count in self._health_check_failures.items():
+            metrics.append(f'health_check_failures{{check="{check_name}"}} {failure_count}')
         
         if resource_metrics["gpu"]:
             for gpu in resource_metrics["gpu"]["devices"]:

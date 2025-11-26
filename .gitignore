@@ -84,6 +84,21 @@ temp/
 # Docker
 .dockerignore
 
+# Secrets (BuildKit secrets should never be committed)
+secrets/
+*.secret
+*.key
+*.pem
+*.crt
+!*.example.key
+!*.example.pem
+
+# Security scanning
+.trivy/
+trivy-*.json
+trivy-*.sarif
+*-scan-results.*
+
 # Redis
 dump.rdb
 

@@ -142,3 +142,82 @@ def test_custom_exceptions_preserve_context_property(exception_type, custom_mess
     except BaseAPIException as caught:
         assert caught.message == custom_message, "Caught exception should have same message"
         assert caught.details == details, "Caught exception should have same details"
+
+
+@given(
+    error_description=st.text(min_size=10, max_size=200),
+    resolution_steps=st.lists(
+        st.text(min_size=5, max_size=100),
+        min_size=1,
+        max_size=5
+    ),
+    error_code=st.text(
+        min_size=1, 
+        max_size=50, 
+        alphabet=st.characters(whitelist_categories=('Lu', 'Ll', 'Nd'), whitelist_characters='_')
+    )
+)
+@hypothesis_settings(max_examples=100)
+def test_error_message_clarity_property(error_description, resolution_steps, error_code):
+    """
+    Feature: optimized-container-infrastructure, Property 3: Error Message Clarity
+    
+    For any startup error condition, the system should produce error messages 
+    containing both the error description and actionable resolution steps.
+    Validates: Requirements 1.5
+    """
+    # Create error with description and resolution steps
+    details = {
+        "description": error_description,
+        "resolution_steps": resolution_steps,
+        "error_type": "startup_error"
+    }
+    
+    exc = BaseAPIException(
+        message=error_description,
+        error_code=error_code,
+        details=details
+    )
+    
+    # Property 1: Error must have a description
+    assert exc.message, "Error must have a non-empty message/description"
+    assert len(exc.message) >= 10, "Error description should be meaningful (at least 10 chars)"
+    assert exc.message == error_description, "Error description should match provided description"
+    
+    # Property 2: Error details must contain resolution steps
+    assert "resolution_steps" in exc.details, "Error details must contain 'resolution_steps' key"
+    assert isinstance(exc.details["resolution_steps"], list), "Resolution steps should be a list"
+    assert len(exc.details["resolution_steps"]) > 0, "Resolution steps list should not be empty"
+    
+    # Property 3: Each resolution step should be actionable (non-empty string)
+    for step in exc.details["resolution_steps"]:
+        assert isinstance(step, str), "Each resolution step should be a string"
+        assert len(step) >= 5, "Each resolution step should be meaningful (at least 5 chars)"
+    
+    # Property 4: Error should have both description and resolution in details
+    assert "description" in exc.details, "Error details should contain description"
+    assert exc.details["description"] == error_description, "Description in details should match"
+    
+    # Property 5: Error code should be present and meaningful
+    assert exc.error_code, "Error code should not be empty"
+    assert len(exc.error_code) > 0, "Error code should be meaningful"
+    
+    # Property 6: When formatted as dict, all information should be accessible
+    error_dict = {
+        "error_code": exc.error_code,
+        "message": exc.message,
+        "details": exc.details
+    }
+    
+    assert error_dict["message"], "Formatted error should have message"
+    assert error_dict["details"]["resolution_steps"], "Formatted error should have resolution steps"
+    assert len(error_dict["details"]["resolution_steps"]) > 0, "Formatted error should have at least one resolution step"
+    
+    # Property 7: Error information should be JSON serializable for logging/API responses
+    try:
+        json_str = json.dumps(error_dict)
+        parsed = json.loads(json_str)
+        assert parsed["message"] == error_description, "Error should be JSON serializable"
+        assert parsed["details"]["resolution_steps"] == resolution_steps, "Resolution steps should survive JSON serialization"
+    except (TypeError, ValueError) as e:
+        raise AssertionError(f"Error information should be JSON serializable: {e}")
