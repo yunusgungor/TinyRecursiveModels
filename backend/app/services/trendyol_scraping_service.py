@@ -148,7 +148,7 @@ class TrendyolScrapingService:
         
         Args:
             category: Product category
-            keywords: Search keywords (currently not used in scraping)
+            keywords: Search keywords
             max_results: Maximum number of results
             min_price: Minimum price filter
             max_price: Maximum price filter
@@ -184,16 +184,35 @@ class TrendyolScrapingService:
             # Get scraper
             scraper = await self._get_scraper(categories=[scraping_category])
             
-            # Scrape products
-            scraped_data = await scraper.scrape_products(max_products=max_results)
+            all_scraped_data = []
             
-            if not scraped_data:
+            if keywords:
+                # Search for each keyword separately
+                # Calculate limit per keyword to maintain diversity but respect total limit
+                # We fetch a bit more to allow for filtering
+                per_keyword_limit = max(15, int(max_results * 1.5 / len(keywords)))
+                
+                for keyword in keywords:
+                    logger.info(f"Searching for keyword: {keyword}")
+                    print(f"DEBUG: Searching for keyword: {keyword}")
+                    keyword_data = await scraper.scrape_products(
+                        max_products=per_keyword_limit, 
+                        search_query=keyword
+                    )
+                    all_scraped_data.extend(keyword_data)
+            else:
+                # Fallback to category scraping if no keywords
+                all_scraped_data = await scraper.scrape_products(max_products=max_results)
+            
+            if not all_scraped_data:
                 logger.warning(f"No products found for category: {category}")
                 return []
             
-            # Convert to TrendyolProduct objects
+            # Convert to TrendyolProduct objects and dedup
             products = []
-            for item in scraped_data:
+            seen_ids = set()
+            
+            for item in all_scraped_data:
                 try:
                     # Apply price filters
                     price = item.get("price", 0)
@@ -201,6 +220,12 @@ class TrendyolScrapingService:
                         continue
                     if max_price is not None and price > max_price:
                         continue
+                    
+                    # Dedup check (using URL or name as ID proxy if ID not present)
+                    product_id = item.get("id") or item.get("url")
+                    if not product_id or product_id in seen_ids:
+                        continue
+                    seen_ids.add(product_id)
                     
                     product = TrendyolProduct(item)
                     products.append(product)
@@ -211,7 +236,7 @@ class TrendyolScrapingService:
             # Cache results
             self._set_cache(cache_key, products)
             
-            logger.info(f"Scraped {len(products)} products")
+            logger.info(f"Scraped {len(products)} unique products")
             return products[:max_results]
             
         except Exception as e:

@@ -93,6 +93,10 @@ services:
       # Mount shared resources (read-only for isolation)
       - ./checkpoints:/app/checkpoints:ro
       - ./models:/app/models:ro
+      # Mount scraping module
+      - ./scraping:/scraping:ro
+      # Mount data directory for dynamic categories
+      - ./data:/app/data:ro
     ports:
       - "8000:8000"
       - "5678:5678"  # Debug port

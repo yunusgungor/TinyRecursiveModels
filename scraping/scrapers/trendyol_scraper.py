@@ -54,9 +54,14 @@ class TrendyolScraper(BaseScraper):
         self.categories = config.get('categories', ['elektronik'])
         self.max_products = config.get('max_products', 500)
     
-    async def scrape_products(self, max_products: int) -> List[Dict[str, Any]]:
+    async def scrape_products(self, max_products: int, search_query: str = None) -> List[Dict[str, Any]]:
         """Scrape products from Trendyol"""
         self.logger.info(f"Starting to scrape up to {max_products} products from Trendyol")
+        print(f"DEBUG: Scraper received search_query: {search_query}")
+        
+        if search_query:
+            self.logger.info(f"Searching for: {search_query}")
+            return await self._scrape_search(search_query, max_products)
         
         all_products = []
         
@@ -70,6 +75,46 @@ class TrendyolScraper(BaseScraper):
         
         self.logger.info(f"Scraped {len(all_products)} products from Trendyol")
         return all_products
+
+    async def _scrape_search(self, query: str, max_products: int) -> List[Dict[str, Any]]:
+        """Scrape products from search results"""
+        products = []
+        page = await self.create_page()
+        
+        try:
+            # Construct search URL
+            import urllib.parse
+            encoded_query = urllib.parse.quote(query)
+            search_url = f"{self.base_url}/sr?q={encoded_query}"
+            
+            success = await self.safe_goto(page, search_url)
+            if not success:
+                self.logger.error(f"Failed to load search results for: {query}")
+                return products
+            
+            product_urls = await self._extract_product_urls(page, max_products)
+            self.logger.info(f"Found {len(product_urls)} product URLs for search: {query}")
+            
+            for url in product_urls:
+                if len(products) >= max_products:
+                    break
+                
+                try:
+                    product_data = await self.extract_product_details(page, url)
+                    if product_data:
+                        products.append(product_data)
+                        self.stats['products_scraped'] += 1
+                        
+                        if len(products) % 10 == 0:
+                            self.logger.info(f"Scraped {len(products)} products so far...")
+                except Exception as e:
+                    self.logger.error(f"Failed to scrape product {url}: {e}")
+                    self.stats['products_failed'] += 1
+        
+        finally:
+            await page.close()
+        
+        return products
 
     async def _scrape_category(self, category: str, max_products: int) -> List[Dict[str, Any]]:
         """Scrape products from a specific category"""

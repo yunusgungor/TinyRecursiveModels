@@ -100,6 +100,14 @@ class ModelInferenceService:
                 config = self._get_default_config()
                 logger.warning("Config not found in checkpoint, using default")
             
+            # Override max_recommendations to allow more suggestions
+            if isinstance(config, dict):
+                config['max_recommendations'] = 10
+                logger.info("Overrode max_recommendations to 10")
+            elif hasattr(config, 'max_recommendations'):
+                config.max_recommendations = 10
+                logger.info("Overrode max_recommendations to 10")
+            
             # Extract state dict
             if 'model_state_dict' in checkpoint:
                 state_dict = checkpoint['model_state_dict']
@@ -125,7 +133,7 @@ class ModelInferenceService:
                        f"categories={config.get('category_vocab_size', 'N/A')}")
             
             # Initialize model with checkpoint-specific vocab sizes
-            self.model = IntegratedEnhancedTRM(config, verbose=False)
+            self.model = IntegratedEnhancedTRM(config, verbose=True)
             
             # Load state dict with strict=False to allow size mismatches
             # This will skip layers that don't match

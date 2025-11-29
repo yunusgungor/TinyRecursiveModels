@@ -26,20 +26,20 @@ export function HomePage() {
   const handleSubmit = async (profile: UserProfile) => {
     // Add to search history
     addSearchHistory(profile);
-    
+
     setIsPending(true);
     setIsError(false);
     setError(null);
-    
+
     try {
       // Import the API client
       const { recommendationsApi } = await import('@/lib/api/recommendations');
       const response = await recommendationsApi.getRecommendations({
         userProfile: profile,
-        maxRecommendations: 5,
+        maxRecommendations: 10,
         useCache: true,
       });
-      
+
       setData(response);
       setToolResults(response.toolResults as ToolResults);
       setIsPending(false);
@@ -221,7 +221,7 @@ export function HomePage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-4 sm:py-6 md:py-8">
       {/* Theme Toggle Button */}
       <ThemeToggle />
-      
+
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="text-center mb-6 sm:mb-8">
@@ -238,31 +238,28 @@ export function HomePage() {
           <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-1 touch-manipulation">
             <button
               onClick={() => setViewMode('search')}
-              className={`px-4 sm:px-6 py-2 rounded-md font-medium transition-colors touch-target whitespace-nowrap ${
-                viewMode === 'search'
+              className={`px-4 sm:px-6 py-2 rounded-md font-medium transition-colors touch-target whitespace-nowrap ${viewMode === 'search'
                   ? 'bg-blue-600 text-white'
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600'
-              }`}
+                }`}
             >
               Arama
             </button>
             <button
               onClick={() => setViewMode('favorites')}
-              className={`px-4 sm:px-6 py-2 rounded-md font-medium transition-colors touch-target whitespace-nowrap ${
-                viewMode === 'favorites'
+              className={`px-4 sm:px-6 py-2 rounded-md font-medium transition-colors touch-target whitespace-nowrap ${viewMode === 'favorites'
                   ? 'bg-blue-600 text-white'
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600'
-              }`}
+                }`}
             >
               Favoriler
             </button>
             <button
               onClick={() => setViewMode('history')}
-              className={`px-4 sm:px-6 py-2 rounded-md font-medium transition-colors touch-target whitespace-nowrap ${
-                viewMode === 'history'
+              className={`px-4 sm:px-6 py-2 rounded-md font-medium transition-colors touch-target whitespace-nowrap ${viewMode === 'history'
                   ? 'bg-blue-600 text-white'
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600'
-              }`}
+                }`}
             >
               Geçmiş
             </button>
@@ -277,14 +274,14 @@ export function HomePage() {
               <UserProfileForm onSubmit={handleSubmit} isLoading={isPending} />
             )}
 
-        {/* Loading State */}
-        {isPending && renderLoadingState()}
+            {/* Loading State */}
+            {isPending && renderLoadingState()}
 
-        {/* Error State */}
-        {isError && renderErrorState()}
+            {/* Error State */}
+            {isError && renderErrorState()}
 
-        {/* Recommendations */}
-        {data && !isPending && !isError && renderRecommendations()}
+            {/* Recommendations */}
+            {data && !isPending && !isError && renderRecommendations()}
 
             {/* Tool Results Modal */}
             {selectedRecommendation && (

@@ -242,10 +242,21 @@ async def get_recommendations(
         
         except ModelInferenceError as e:
             logger.error(f"Model inference error: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Model şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin."
+            
+            # Fallback mekanizması kaldırıldı - Kullanıcı isteği üzerine
+            # Model hatası durumunda yanlış/eksik veri dönmek yerine hata bildiriyoruz.
+            
+            return EnhancedRecommendationResponse(
+                recommendations=[],
+                tool_results={
+                    "error": str(e), 
+                    "message": "Model işlemi sırasında bir hata oluştu. Lütfen tekrar deneyin."
+                },
+                reasoning_trace=None,
+                inference_time=time.time() - start_time,
+                cache_hit=False
             )
+            reasoning_trace = None
         
         # Step 5: Execute additional tools if needed
         # (Tools are already executed during model inference)
@@ -445,20 +456,17 @@ def _generate_keywords(user_profile) -> List[str]:
     """
     keywords = []
     
-    # Add occasion
-    keywords.append(user_profile.occasion)
+    # Priority 1: Hobbies (These are the most important for product relevance)
+    if user_profile.hobbies:
+        # Use all hobbies for search
+        keywords.extend(user_profile.hobbies)
     
-    # Add relationship
-    keywords.append(user_profile.relationship)
-    
-    # Add hobbies (limit to 2)
-    keywords.extend(user_profile.hobbies[:2])
-    
-    # Add personality traits (limit to 1)
-    if user_profile.personality_traits:
-        keywords.append(user_profile.personality_traits[0])
-    
-    # Add generic gift keyword
-    keywords.append("hediye")
+    # Priority 2: Personality traits (Use only if hobbies are sparse)
+    if user_profile.personality_traits and len(keywords) < 2:
+        keywords.extend(user_profile.personality_traits[:2])
+        
+    # Do NOT add occasion, relationship or 'hediye' to search query
+    # These dilute the search results on e-commerce sites.
+    # The model will filter the scraped products based on occasion/relationship suitability later.
     
     return keywords

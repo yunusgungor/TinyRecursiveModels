@@ -17,6 +17,22 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     curl \
+    # Playwright dependencies
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpango-1.0-0 \
+    libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependencies stage - cached layer for dependency files
@@ -32,7 +48,8 @@ FROM dependencies as development
 
 # Use cache mount for pip to speed up builds (BuildKit cache optimization)
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements-dev.txt
+    pip install -r requirements-dev.txt && \
+    playwright install chromium
 
 # Copy application code last (changes most frequently)
 COPY . .
