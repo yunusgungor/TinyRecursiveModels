@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     TRENDYOL_API_BASE_URL: str = "https://api.trendyol.com"
     TRENDYOL_RATE_LIMIT: int = 100  # requests per minute
     
+    # Google Search API Settings
+    GOOGLE_SEARCH_API_KEY: str = ""
+    GOOGLE_SEARCH_CX: str = ""
+    USE_GOOGLE_SEARCH_API: bool = True
+    
     # Cache Settings
     CACHE_TTL_RECOMMENDATIONS: int = 3600  # 1 hour
     CACHE_TTL_TRENDYOL_DATA: int = 1800  # 30 minutes

@@ -456,17 +456,43 @@ def _generate_keywords(user_profile) -> List[str]:
     """
     keywords = []
     
-    # Priority 1: Hobbies (These are the most important for product relevance)
+    # Priority 1: Hobbies (Most specific indicators)
     if user_profile.hobbies:
-        # Use all hobbies for search
         keywords.extend(user_profile.hobbies)
     
-    # Priority 2: Personality traits (Use only if hobbies are sparse)
-    if user_profile.personality_traits and len(keywords) < 2:
+    # Priority 2: Occasion (Context is crucial for gifts)
+    # Translate common occasions to Turkish search terms if needed
+    occasion_map = {
+        "birthday": "Doğum Günü",
+        "anniversary": "Yıldönümü",
+        "wedding": "Düğün",
+        "graduation": "Mezuniyet",
+        "new_year": "Yılbaşı",
+        "valentines": "Sevgililer Günü",
+        "mothers_day": "Anneler Günü",
+        "fathers_day": "Babalar Günü"
+    }
+    
+    if user_profile.occasion:
+        occ_term = occasion_map.get(user_profile.occasion.lower(), user_profile.occasion)
+        keywords.append(occ_term)
+
+    # Priority 3: Relationship (Helps with gender/age context sometimes)
+    relationship_map = {
+        "friend": "Arkadaş",
+        "partner": "Sevgili",
+        "spouse": "Eş",
+        "parent": "Anne Baba",
+        "sibling": "Kardeş",
+        "child": "Çocuk"
+    }
+    
+    if user_profile.relationship:
+        rel_term = relationship_map.get(user_profile.relationship.lower(), user_profile.relationship)
+        keywords.append(rel_term)
+    
+    # Priority 4: Personality traits (Abstract, but can help)
+    if user_profile.personality_traits:
         keywords.extend(user_profile.personality_traits[:2])
         
-    # Do NOT add occasion, relationship or 'hediye' to search query
-    # These dilute the search results on e-commerce sites.
-    # The model will filter the scraped products based on occasion/relationship suitability later.
-    
     return keywords

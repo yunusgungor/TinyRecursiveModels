@@ -84,6 +84,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
       - DEBUG=${DEBUG:-true}
       - PYTHONUNBUFFERED=1
+    env_file:
+      - ./backend/.env
     volumes:
       # Hot reload: mount source code
       - ./backend:/app

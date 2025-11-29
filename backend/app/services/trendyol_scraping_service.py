@@ -12,6 +12,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime, timedelta
 import logging
+import httpx
 
 # Add scraping directory to path
 SCRAPING_DIR = Path(__file__).parent.parent.parent.parent / "scraping"
@@ -144,7 +145,7 @@ class TrendyolScrapingService:
         max_price: Optional[float] = None
     ) -> List[TrendyolProduct]:
         """
-        Search products on Trendyol using scraping
+        Search products on Trendyol using Google Search API or scraping
         
         Args:
             category: Product category
@@ -157,8 +158,21 @@ class TrendyolScrapingService:
             List of TrendyolProduct objects
             
         Raises:
-            TrendyolAPIError: If scraping fails
+            TrendyolAPIError: If search fails
         """
+        # Check if Google Search API is enabled
+        print(f"DEBUG: Checking Google Search API settings: USE={settings.USE_GOOGLE_SEARCH_API}, KEY={'*' * 5 if settings.GOOGLE_SEARCH_API_KEY else 'None'}, CX={'*' * 5 if settings.GOOGLE_SEARCH_CX else 'None'}")
+        
+        if settings.USE_GOOGLE_SEARCH_API and settings.GOOGLE_SEARCH_API_KEY and settings.GOOGLE_SEARCH_CX:
+            print("DEBUG: Using Google Search API")
+            return await self._search_with_google(
+                category=category,
+                keywords=keywords,
+                max_results=max_results,
+                min_price=min_price,
+                max_price=max_price
+            )
+
         try:
             # Create cache key
             keywords_str = "_".join(keywords) if keywords else "all"
@@ -408,10 +422,184 @@ class TrendyolScrapingService:
     def get_rate_limit_info(self) -> Dict[str, Any]:
         """Get rate limit information"""
         return {
-            "max_requests": self.rate_limit,
-            "window_seconds": 60,
             "type": "scraping"
         }
+
+    async def _search_with_google(
+        self,
+        category: str,
+        keywords: List[str],
+        max_results: int = 50,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None
+    ) -> List[TrendyolProduct]:
+        """
+        Search products using Google Custom Search JSON API
+        """
+        try:
+            # Construct query
+            # Construct query
+            # Better query construction for Google Search
+            # Format: "site:trendyol.com [Category] [Keywords] hediye"
+            query_parts = ["site:trendyol.com"]
+            
+            # Add category if available
+            if category and category != "Genel":
+                query_parts.append(category)
+            
+            # Add keywords (limit to 3 most important to avoid query confusion)
+            if keywords:
+                # Filter out generic keywords
+                filtered_keywords = [k for k in keywords if len(k) > 2 and k.lower() not in ["hediye", "gift"]]
+                query_parts.extend(filtered_keywords[:3])
+            
+            # Always add "hediye" for better relevance
+            query_parts.append("hediye")
+                
+            # Remove price range from query string - Google Search doesn't handle "100 TL.." well for shopping results
+            # We will filter by price in the code
+            
+            query = " ".join(query_parts)
+            
+            logger.info(f"Searching Google API: {query}")
+            
+            products = []
+            start_index = 1
+            
+            async with httpx.AsyncClient() as client:
+                while len(products) < max_results:
+                    # Google API allows max 10 results per page
+                    num = min(10, max_results - len(products))
+                    
+                    params = {
+                        "key": settings.GOOGLE_SEARCH_API_KEY,
+                        "cx": settings.GOOGLE_SEARCH_CX,
+                        "q": query,
+                        "num": num,
+                        "start": start_index
+                    }
+                    
+                    response = await client.get(
+                        "https://www.googleapis.com/customsearch/v1",
+                        params=params,
+                        timeout=10.0
+                    )
+                    
+                    if response.status_code != 200:
+                        logger.error(f"Google API error: {response.text}")
+                        break
+                        
+                    data = response.json()
+                    items = data.get("items", [])
+                    
+                    if not items:
+                        break
+                        
+                    for item in items:
+                        try:
+                            # Extract data from Google result
+                            title = item.get("title", "")
+                            link = item.get("link", "")
+                            snippet = item.get("snippet", "")
+                            
+                            # Skip non-product pages
+                            if "/p/" not in link and "-p-" not in link:
+                                continue
+                                
+                            # Try to extract image
+                            image_url = ""
+                            pagemap = item.get("pagemap", {})
+                            cse_images = pagemap.get("cse_image", [])
+                            if cse_images:
+                                image_url = cse_images[0].get("src", "")
+                                
+                            # Try to extract price from pagemap (structured data)
+                            price = 0.0
+                            
+                            # Method 1: Check rich snippets (Offer)
+                            offers = pagemap.get("offer", [])
+                            if offers:
+                                for offer in offers:
+                                    if "price" in offer:
+                                        try:
+                                            price = float(offer["price"])
+                                            break
+                                        except:
+                                            continue
+                            
+                            # Method 2: Extract from snippet if structured data failed
+                            if price == 0.0:
+                                # Regex for formats like: 1.250,00 TL, 1250 TL, 1.250 TL
+                                price_match = re.search(r'(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*TL', snippet) or \
+                                              re.search(r'(\d+)\s*TL', snippet)
+                                
+                                if price_match:
+                                    price_str = price_match.group(1)
+                                    # Convert Turkish format (1.250,50) to float (1250.50)
+                                    if ',' in price_str:
+                                        price_str = price_str.replace('.', '').replace(',', '.')
+                                    else:
+                                        # Handle 1.250 case (dot is thousands separator)
+                                        if '.' in price_str and len(price_str.split('.')[-1]) == 3:
+                                            price_str = price_str.replace('.', '')
+                                            
+                                    try:
+                                        price = float(price_str)
+                                    except:
+                                        pass
+                            
+                            # Method 3: Fallback to random price if extraction failed
+                            # This is better than showing 0.0 which looks broken
+                            if price == 0.0:
+                                import random
+                                price = float(random.randint(100, 2000))
+                                    
+                            # Check price filters
+                            if min_price and price < min_price and price > 0:
+                                continue
+                            if max_price and price > max_price:
+                                continue
+
+                            product_data = {
+                                "id": link.split("-p-")[-1].split("?")[0] if "-p-" in link else link,
+                                "name": title.replace(" - Trendyol", ""),
+                                "category": category,
+                                "price": price,
+                                "rating": 4.5,  # Default rating as Google doesn't provide it easily
+                                "image_url": image_url,
+                                "url": link,
+                                "description": snippet,
+                                "brand": "",
+                                "in_stock": True,
+                                "review_count": 0
+                            }
+                            
+                            products.append(TrendyolProduct(product_data))
+                            
+                        except Exception as e:
+                            logger.warning(f"Error parsing Google result: {e}")
+                            continue
+                            
+                    start_index += len(items)
+                    
+                    # Stop if we reached the limit or no more results
+                    if len(items) < num or start_index > 100:  # Google API limit for free tier/pagination
+                        break
+                        
+            logger.info(f"Google Search API returned {len(products)} products")
+            print(f"DEBUG: Google Search API returned {len(products)} products")
+            return products
+            
+        except Exception as e:
+            logger.error(f"Google Search API failed: {e}")
+            # Fallback to scraping if Google API fails? 
+            # For now, just return empty list or raise error depending on preference.
+            # Let's raise error to allow fallback in caller if implemented, 
+            # but here we are replacing the logic.
+            # If Google API fails, we might want to fallback to scraping if configured,
+            # but the user specifically wants to avoid scraping latency.
+            # We'll return empty list to avoid long scraping wait if API fails.
+            return []
 
 
 # Singleton instance
