@@ -6,10 +6,25 @@ Eğitilmiş TinyRecursiveModels (TRM) modelini kullanarak Trendyol üzerinden ge
 
 - **Kişiselleştirilmiş Öneriler**: Kullanıcı profiline göre özel hediye önerileri
 - **Çoklu Analiz Araçları**: 6 farklı analiz aracı ile kapsamlı ürün değerlendirmesi
-- **Gerçek Zamanlı Veri**: Trendyol API entegrasyonu ile güncel ürün bilgileri
+- **Gerçek Zamanlı Veri**: Trendyol web scraping entegrasyonu ile güncel ürün bilgileri
 - **Modern UI/UX**: React ve Tailwind CSS ile responsive tasarım
 - **Yüksek Performans**: Redis caching ve optimize edilmiş model inference
 - **Dark Mode**: Göz dostu karanlık tema desteği
+
+## ⚠️ Önemli: Trendyol API → Scraping Geçişi
+
+Trendyol'un gerçek bir API'si olmadığı için backend servisi **web scraping** tabanlı bir implementasyona dönüştürüldü. 
+
+📖 **Detaylı bilgi için**: [`backend/QUICKSTART.md`](backend/QUICKSTART.md)
+
+**Hızlı kurulum**:
+```bash
+cd backend
+pip install -r requirements.txt
+playwright install chromium
+python tests/test_trendyol_scraping.py  # Test
+```
+
 
 ## 🏗️ Mimari
 
@@ -27,8 +42,11 @@ Eğitilmiş TinyRecursiveModels (TRM) modelini kullanarak Trendyol üzerinden ge
        │
        ├──────► PostgreSQL (Database)
        ├──────► Redis (Cache)
-       └──────► Trendyol API
+       └──────► Trendyol (Web Scraping via Playwright)
 ```
+
+**Not**: Backend artık Trendyol'dan veri çekmek için web scraping kullanıyor (Trendyol'un API'si olmadığı için).
+
 
 ## 🚀 Hızlı Başlangıç
 

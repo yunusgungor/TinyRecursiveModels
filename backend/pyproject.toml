@@ -65,6 +65,7 @@ asyncio_mode = "auto"
 addopts = "-v --cov=app --cov-report=html --cov-report=term"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "property_test: marks tests as property-based tests using Hypothesis",
 ]
 
 [tool.coverage.run]

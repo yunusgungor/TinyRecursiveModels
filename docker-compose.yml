@@ -72,9 +72,9 @@ services:
     container_name: trendyol-gift-backend
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-trendyol_gift}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis}@redis:6379/0
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis}@${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-redis}
       - TRENDYOL_API_KEY=${TRENDYOL_API_KEY:-}
       - TRENDYOL_API_SECRET=${TRENDYOL_API_SECRET:-}

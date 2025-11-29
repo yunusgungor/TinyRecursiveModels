@@ -8,7 +8,7 @@ from playwright.async_api import Page
 import re
 import asyncio
 
-from .base_scraper import BaseScraper
+from scrapers.base_scraper import BaseScraper
 
 
 class TrendyolScraper(BaseScraper):

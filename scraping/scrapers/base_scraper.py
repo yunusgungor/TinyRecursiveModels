@@ -9,8 +9,8 @@ import asyncio
 import logging
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 
-from ..utils.rate_limiter import RateLimiter
-from ..utils.anti_bot import AntiBotHelper
+from utils.rate_limiter import RateLimiter
+from utils.anti_bot import AntiBotHelper
 
 
 class BaseScraper(ABC):
